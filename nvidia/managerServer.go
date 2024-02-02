@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"managerGo/podWatch"
 	"managerGo/vcuda"
 	"net"
@@ -148,8 +149,8 @@ func (vm *VirtualManager) Run() {
 	if err := os.MkdirAll(VirtualManagerPath, 0777); err != nil && !os.IsNotExist(err) {
 		log.Fatalf("Failed to create %s, %s.", VirtualManagerPath, err)
 	}
-
-	for len(vm.podMgr.PodModObj) > 0 {
+	fmt.Println("vitrualManager runing")
+	for {
 		if len(vm.podMgr.PodModObj) > 0 {
 			jsonObj := vm.podMgr.PodModObj[0]
 			vm.podMgr.MuOfModify.Lock()
@@ -165,28 +166,33 @@ func (vm *VirtualManager) Run() {
 			go vm.deletePodPath(jsonObj)
 		}
 	}
+
+	fmt.Println("END OF VIRTUALMANAGER.RUN")
 }
 
 /*
 在容器创建前建好，多少个server？
 pod传指针还是实体
+创建一个pod调了5次。。。。
 */
 func (vm *VirtualManager) creatVcudaServer(pod gjson.Result) {
 	meta := pod.Get("metadata")
 	if !meta.Get("annotations").Exists() {
+		fmt.Println(meta)
+		log.Errorln("Failed to get pod annotation.")
 		return
 	}
-
 	annotations := meta.Get("annotations")
-	if !annotations.Get(AnnAssumeTime).Exists() {
+	if !annotations.Get(AnnAssumeTime).Exists() { //调度时分配的
+		fmt.Println(meta.Get("name").String(), "not need gpu resource")
 		return
 	}
-
-	flag := annotations.Get(AnnAssignedFlag).String()
+	flag := annotations.Get(`doslab\.io/gpu-assigned`).String() //调度成功分配的false，容器创建后改成true，这里只检查是否有annotation
 	if flag == "" {
 		log.Errorln("Failed to get assigned flag.")
 		return
 	}
+
 	podName := meta.Get("name").String()
 	if podName == "" {
 		log.Errorln("Failed to get pod name.")
@@ -202,9 +208,8 @@ func (vm *VirtualManager) creatVcudaServer(pod gjson.Result) {
 		log.Errorln("Failed to get pod podUID.")
 		return
 	}
-
 	vm.mu.Lock()
-	if flag == "true" && !vm.PodDoByUID[podUID] {
+	if flag == "true" && !vm.PodDoByUID[podUID] { //容器创建后执行，PodDoByUID保证这些语句只执行一次（pod创建会多次状态变更会多次调用creatVcudaServer）
 		vm.mu.Unlock()
 		status := pod.Get("status")
 
@@ -242,6 +247,7 @@ func (vm *VirtualManager) creatVcudaServer(pod gjson.Result) {
 				return true
 			}
 			uid := strings.Split(uidStr, "docker://")[1]
+			fmt.Println(uid)
 			vm.ContainerNameByUid[uid] = name
 			vm.ContainerUIDByName[name] = uid
 			vm.ContainerUIDInPodUID[podUID] = append(vm.ContainerUIDInPodUID[podUID], uid)
@@ -260,30 +266,29 @@ func (vm *VirtualManager) creatVcudaServer(pod gjson.Result) {
 	vm.PodVisitedByUID[podUID] = true
 	vm.PodByUID[podUID] = pod
 	vm.mu.Unlock()
-
-	//creat vcudaServer
+	//create vcudaServer
 	baseDir := filepath.Join(VirtualManagerPath, podUID)
 	if err := os.MkdirAll(baseDir, 0777); err != nil && !os.IsExist(err) {
-		//log.Errorf("Failed to create %s, %s.", baseDir, err)
+		log.Errorf("Failed to create %s, %s.", baseDir, err)
 		return
 	}
 
 	sockfile := filepath.Join(baseDir, VcudaSocketName)
 	err := syscall.Unlink(sockfile)
 	if err != nil && !os.IsNotExist(err) {
-		//log.Errorf("Failed to remove %s, %s.", sockfile, err)
+		log.Errorf("Failed to remove %s, %s.", sockfile, err)
 		return
 	}
 
 	l, err := net.Listen("unix", sockfile)
 	if err != nil {
-		//log.Errorf("Failed to listen for %s, %s.", sockfile, err)
+		log.Errorf("Failed to listen for %s, %s.", sockfile, err)
 		return
 	}
 
 	err = os.Chmod(sockfile, 0777)
 	if err != nil {
-		//log.Errorf("Failed to chmod for %s, %s.", sockfile, err)
+		log.Errorf("Failed to chmod for %s, %s.", sockfile, err)
 		return
 	}
 	server := grpc.NewServer([]grpc.ServerOption{}...)
@@ -324,7 +329,7 @@ func (vm *VirtualManager) creatVcudaServer(pod gjson.Result) {
 	vm.MemoryRequestByPodUID[podUID] = requestMemory
 	vm.mu.Unlock()
 
-	// Update annotation
+	//Update annotation
 	time.Sleep(time.Second)
 	copyPodBytes, err := vm.client.GetResource("Pod", namespace, podName)
 	if err != nil {

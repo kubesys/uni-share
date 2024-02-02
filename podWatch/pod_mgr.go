@@ -6,7 +6,6 @@ package podWatch
 
 import (
 	"encoding/json"
-	"fmt"
 	"sync"
 
 	"github.com/kubesys/client-go/pkg/kubesys"
@@ -28,20 +27,20 @@ func NewPodManager() *PodManager {
 }
 
 func (podMgr *PodManager) DoAdded(obj map[string]interface{}) {
-	fmt.Println("add pod")
-	bytes, _ := json.Marshal(obj)
-	fmt.Println(kubesys.ToJsonObject(bytes))
-	for k, _ := range obj {
-		fmt.Println(k)
-	}
+
+	// bytes, _ := json.Marshal(obj)
+	// fmt.Println(kubesys.ToJsonObject(bytes))
+	// for k, _ := range obj {
+	// 	fmt.Println(k)
+	// }
 }
 
+// 删除pod和创建pod都会有多次状态变更，触发函数往PodModObj放数据
 func (podMgr *PodManager) DoModified(obj map[string]interface{}) {
 	bytes, _ := json.Marshal(obj)
 	podMgr.MuOfModify.Lock()
 	podMgr.PodModObj = append(podMgr.PodModObj, kubesys.ToJsonObject(bytes))
 	podMgr.MuOfModify.Unlock()
-	fmt.Println(("update pod"))
 }
 
 func (podMgr *PodManager) DoDeleted(obj map[string]interface{}) {
@@ -50,5 +49,4 @@ func (podMgr *PodManager) DoDeleted(obj map[string]interface{}) {
 	podMgr.PodDelObj = append(podMgr.PodDelObj, kubesys.ToJsonObject(bytes))
 	podMgr.MuOfDelete.Unlock()
 
-	fmt.Println("delete pod")
 }

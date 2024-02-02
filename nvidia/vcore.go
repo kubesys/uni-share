@@ -2,6 +2,7 @@ package nvidia
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"managerGo/deviceInfo"
 	"managerGo/podWatch"
@@ -22,13 +23,6 @@ const (
 	vmluCoreSocketName    = "vmlucore.sock"
 )
 
-type ResourceServer interface {
-	SocketName() string
-	ResourceName() string
-	Stop()
-	Run() error
-}
-
 type VcoreResourceServer struct {
 	kubeMessenger *podWatch.KubeMessenger
 	srv           *grpc.Server
@@ -45,10 +39,10 @@ func NewVcoreResourceServer(coreSocketName string, resourceName string, kubeMess
 
 	return &VcoreResourceServer{
 		kubeMessenger: kubeMessenger,
-		srv:           grpc.NewServer(),
-		socketFile:    socketFile,
-		resourceName:  resourceName,
-		devInfo:       devInfo,
+		//srv:           grpc.NewServer(),
+		socketFile:   socketFile,
+		resourceName: resourceName,
+		devInfo:      devInfo,
 	}
 }
 
@@ -65,6 +59,7 @@ func (vr *VcoreResourceServer) Stop() {
 }
 
 func (vr *VcoreResourceServer) Run() error {
+	vr.srv = grpc.NewServer()
 	pluginapi.RegisterDevicePluginServer(vr.srv, vr)
 
 	err := syscall.Unlink(vr.socketFile)
@@ -84,17 +79,12 @@ func (vr *VcoreResourceServer) Run() error {
 
 /** device plugin interface */
 func (vr *VcoreResourceServer) Allocate(ctx context.Context, reqs *pluginapi.AllocateRequest) (*pluginapi.AllocateResponse, error) {
-	klog.V(2).Infof("%+v allocation request for vcore", reqs)
+
+	fmt.Println("%+v allocation request for vcore", reqs)
 	allocResp := &pluginapi.AllocateResponse{}
 
 	req := reqs.ContainerRequests[0]
 	allReqDevice := len(req.DevicesIDs)
-
-	/*等待pod对应的virtual server启动（那边通过watch DoModified机制，检测到有gpu需求的pod就创建对应server，那后续已经建好的pod有修改又触发一次？应该在这做状态检查），
-	  那也监控pending来创建server不就不用做状态检查了？
-	  再进行容器创建（容器没创建pod各字段都是什么？），问题：确定这个allocate请求对应哪个pod,容器没创建pod为pending状态，查询
-	  pending状态的pod确定。
-	*/
 
 	//获取未创建的gpuPod
 	var reqDevCount int
@@ -103,7 +93,7 @@ func (vr *VcoreResourceServer) Allocate(ctx context.Context, reqs *pluginapi.All
 	var flag bool = false
 	for _, v := range pendingPod {
 		for _, cont := range v.Spec.Containers {
-			if _, ok := cont.Resources.Limits[ResourceMemory]; ok {
+			if _, ok := cont.Resources.Limits[ResourceCore]; ok {
 				flag = true
 				break
 			}
@@ -124,32 +114,28 @@ func (vr *VcoreResourceServer) Allocate(ctx context.Context, reqs *pluginapi.All
 			break
 		}
 	}
-	confirmPod = *candidatePodList[0]
-	confirmPod.Annotations[AnnVCUDAReady] = "no"
-	// isOk := false
-	// for i := 0; i < 100; i++ {
-	// 	pod := p.messenger.GetPodOnNode(assumePod.Name, assumePod.Namespace)
-	// 	if pod == nil {
-	// 		log.Warningf("Failed to get pod %s, on ns %s.", assumePod.Name, assumePod.Namespace)
-	// 		time.Sleep(time.Millisecond * 200)
-	// 		continue
-	// 	}
-	// 	ready := getVCUDAReadyFromPodAnnotation(pod)
-	// 	if ready != "" {
-	// 		isOk = true
-	// 		assumePod = pod
-	// 		break
-	// 	}
-	// 	time.Sleep(time.Millisecond * 200)
-	// }
 
-	// if !isOk {
-	// 	return nil, errors.New("vcuda not ready")
-	// }
+	//等待那边server建好文件夹，这里确定是哪个pod，再挂对应pod文件夹进去
+	isOk := false
+	for i := 0; i < 100; i++ {
+		pod := vr.kubeMessenger.GetPodOnNode(confirmPod.Namespace, confirmPod.Name)
+		if pod == nil {
+			fmt.Printf("Failed to get pod %s, on ns %s.\n", confirmPod.Namespace, confirmPod.Name)
+			time.Sleep(time.Millisecond * 200)
+			continue
+		}
+		ready := getVCUDAReadyFromPodAnnotation(pod)
+		if ready != "" {
+			isOk = true
+			confirmPod = *pod
+			break
+		}
+		time.Sleep(time.Millisecond * 2000)
+	}
 
-	// if confirmPod.Annotations[AnnVCUDAReady] == "yes" {
-	// 	continue
-	// }
+	if !isOk {
+		return nil, errors.New("vcuda not ready")
+	}
 
 	conAllocResp := &pluginapi.ContainerAllocateResponse{
 		Envs:        make(map[string]string),
@@ -158,11 +144,11 @@ func (vr *VcoreResourceServer) Allocate(ctx context.Context, reqs *pluginapi.All
 		Annotations: make(map[string]string),
 	}
 
-	conAllocResp.Envs["LD_LIBRARY_PATH"] = "/usr/local/nvidia"
+	conAllocResp.Envs["LD_LIBRARY_PATH"] = "/usr/local/nvidia/lib64"
 	conAllocResp.Envs["NVIDIA_VISIBLE_DEVICES"] = "0"
 	conAllocResp.Mounts = append(conAllocResp.Mounts, &pluginapi.Mount{
 		ContainerPath: "/usr/local/nvidia",
-		HostPath:      "/etc/unishare",
+		HostPath:      "/usr/local/nvidia",
 		ReadOnly:      true,
 	})
 	conAllocResp.Devices = append(conAllocResp.Devices, &pluginapi.DeviceSpec{
@@ -180,12 +166,19 @@ func (vr *VcoreResourceServer) Allocate(ctx context.Context, reqs *pluginapi.All
 		HostPath:      "/dev/nvidia-uvm-tools",
 		Permissions:   "rwm",
 	})
+	//根据调度器分配的uuid，或者gpuid，再决定挂哪个设备上去
 	conAllocResp.Devices = append(conAllocResp.Devices, &pluginapi.DeviceSpec{
 		ContainerPath: "/dev/nvidia0",
 		HostPath:      "/dev/nvidia0",
 		Permissions:   "rwm",
 	})
-	conAllocResp.Annotations["doslab.io/assign"] = "true"
+
+	confirmPod.Annotations[AnnAssignedFlag] = "true"
+	err := vr.kubeMessenger.UpdatePodAnnotations(&confirmPod)
+	if err != nil {
+		fmt.Printf("Failed to update pod annotation for pod %s on ns %s.", confirmPod.Name, confirmPod.Namespace)
+		return nil, errors.New("failed to update pod annotation")
+	}
 
 	allocResp.ContainerResponses = append(allocResp.ContainerResponses, conAllocResp)
 
@@ -194,6 +187,7 @@ func (vr *VcoreResourceServer) Allocate(ctx context.Context, reqs *pluginapi.All
 
 func (vr *VcoreResourceServer) ListAndWatch(e *pluginapi.Empty, s pluginapi.DevicePlugin_ListAndWatchServer) error {
 	klog.V(2).Infof("ListAndWatch request for vcore")
+	fmt.Println("ListAndWatch request for vcore")
 
 	devs := make([]*pluginapi.Device, 0)
 	devs = vr.getNvidiaDevice()
@@ -246,19 +240,21 @@ func (vr *VcoreResourceServer) getNvidiaDevice() []*pluginapi.Device {
 		}
 		devs = append(devs, gpuDevices)
 	}
-	memInfo := vr.devInfo.GetMemInfo()
-	var totalMemOnNode uint64
-	for _, v := range memInfo {
-		totalMemOnNode += v.Total
-	}
-	memResourceCount := totalMemOnNode / 268435456 //256M = 268435456Bytes
-	for i := uint64(0); i < memResourceCount; i++ {
-		memDevices := &pluginapi.Device{
-			ID:     fmt.Sprintf("%s-%d", ResourceMemory, i),
-			Health: pluginapi.Healthy,
-		}
-		devs = append(devs, memDevices)
-	}
 
 	return devs
 }
+
+func getVCUDAReadyFromPodAnnotation(pod *v1.Pod) string {
+	ready := ""
+	if len(pod.ObjectMeta.Annotations) > 0 {
+		value, found := pod.ObjectMeta.Annotations[AnnVCUDAReady]
+		if found {
+			ready = value
+		} else {
+			fmt.Printf("Failed to get vcuda flag for pod %s in ns %s.\n", pod.Name, pod.Namespace)
+		}
+	}
+	return ready
+}
+
+func allocFakeAnnotationForTest()

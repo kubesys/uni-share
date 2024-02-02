@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
-	deviceInfo "managerGo/deviceInfo"
+	"managerGo/deviceInfo"
 	"managerGo/nvidia"
 	"managerGo/podWatch"
 	"net"
@@ -14,30 +14,35 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/kubesys/client-go/pkg/kubesys"
-	"github.com/spf13/pflag"
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
-	"k8s.io/klog"
 	pluginapi "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 )
 
 var (
-	url        = pflag.String("url", "", "https://ip:port")
-	token      = pflag.String("token", "", "master node token")
-	serverFlag = false
+	//url        = pflag.String("url", "", "https://ip:port")
+	//token      = pflag.String("token", "", "master node token")
+	serverFlag  = false
+	resourceSrv = make(map[string]nvidia.ResourceServer, 0)
+)
+
+const (
+	url   = "https://133.133.135.73:6443"
+	token = "s"
 )
 
 func main() {
-	pflag.Parse()
+	//pflag.Parse()
 
-	fmt.Println("String Flag:", *url)
-	fmt.Println("String Flag:", *token)
+	//fmt.Println("String Flag:", *url)
+	//fmt.Println("String Flag:", *token)
 
-	client := kubesys.NewKubernetesClient(*url, *token)
+	//client := kubesys.NewKubernetesClientWithDefaultKubeConfig()
+	client := kubesys.NewKubernetesClient(url, token)
 	client.Init()
 
 	podMgr := podWatch.NewPodManager()
-	mes := podWatch.NewKubeMessenger(client, "aaa")
+	mes := podWatch.NewKubeMessenger(client, "133.133.135.73")
 	podWatcher := kubesys.NewKubernetesWatcher(client, podMgr)
 	go client.WatchResources("Pod", "", podWatcher)
 	virtMgr := nvidia.NewVirtualManager(client, podMgr)
@@ -46,17 +51,20 @@ func main() {
 	devInfo := deviceInfo.NewGpuInfo(client)
 	devInfo.NvmlTest()
 	//自己打上环境变量，从环境变量获取节点名称
-	devInfo.CreateCRD("133.133.135.73")
+	//devInfo.CreateCRD("133.133.135.73")
 
-	vcoreServer := nvidia.NewVcoreResourceServer("vmlucore.sock", "doslab.io/vmlucore", mes, devInfo)
-	go vcoreServer.Run() //错误怎么处理
+	vcoreServer := nvidia.NewVcoreResourceServer("core.sock", "doslab.io/gpu-core", mes, devInfo)
+	go vcoreServer.Run()
+	resourceSrv["1"] = vcoreServer
+	vmemServer := nvidia.NewVmemResourceServer(devInfo, "mem.sock")
+	go vmemServer.Run()
+	resourceSrv["2"] = vmemServer
 
 	//结束处理
 	sigChan := nvidia.NewOSWatcher(syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM) //注册信号处理函数，接受到这几个信号将信号通知发送给sigChan
 	go func() {
 		select {
 		case sig := <-sigChan:
-			//devicePlugin.Stop()
 			vcoreServer.Stop()
 			log.Fatalf("Received signal %v, shutting down.", sig)
 		}
@@ -71,13 +79,14 @@ restart:
 
 	if serverFlag {
 		vcoreServer.Stop()
-		if err := os.Remove(pluginapi.DevicePluginPath + "vmlucore.sock"); err != nil && !os.IsNotExist(err) {
+		if err := os.Remove(pluginapi.DevicePluginPath + "core.sock"); err != nil && !os.IsNotExist(err) {
 			log.Fatalf("Failed to remove sock: %s.", err)
 		}
 		go vcoreServer.Run()
+
 	}
 
-	err = registerToKubelet(vcoreServer)
+	err = registerToKubelet(vcoreServer, vmemServer)
 	if err != nil {
 		serverFlag = false
 		goto restart
@@ -98,8 +107,7 @@ restart:
 	}
 }
 
-// 多种资源注册怎么安排
-func registerToKubelet(vcoreServer *nvidia.VcoreResourceServer) error {
+func registerToKubelet(vcoreServer *nvidia.VcoreResourceServer, vmemServer *nvidia.VmemResourceServer) error {
 	socketFile := "/var/lib/kubelet/device-plugins/kubelet.sock"
 	dialOptions := []grpc.DialOption{grpc.WithInsecure(), grpc.WithDialer(UnixDial), grpc.WithBlock(), grpc.WithTimeout(time.Second * 5)}
 
@@ -111,17 +119,18 @@ func registerToKubelet(vcoreServer *nvidia.VcoreResourceServer) error {
 
 	client := pluginapi.NewRegistrationClient(conn)
 
-	req := &pluginapi.RegisterRequest{
-		Version:      pluginapi.Version,
-		Endpoint:     path.Base(vcoreServer.SocketName()),
-		ResourceName: vcoreServer.ResourceName(),
-		Options:      &pluginapi.DevicePluginOptions{PreStartRequired: true},
-	}
-
-	klog.V(2).Infof("Register to kubelet with endpoint %s", req.Endpoint)
-	_, err = client.Register(context.Background(), req)
-	if err != nil {
-		return err
+	for _, v := range resourceSrv {
+		req := &pluginapi.RegisterRequest{
+			Version:      pluginapi.Version,
+			Endpoint:     path.Base(v.SocketName()),
+			ResourceName: v.ResourceName(),
+			Options:      &pluginapi.DevicePluginOptions{PreStartRequired: true},
+		}
+		fmt.Println("Register to kubelet with endpoint %s", req.Endpoint)
+		_, err = client.Register(context.Background(), req)
+		if err != nil {
+			return err
+		}
 	}
 
 	return nil

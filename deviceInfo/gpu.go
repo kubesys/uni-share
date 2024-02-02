@@ -72,9 +72,6 @@ func (m *GpuInfo) NvmlTest() {
 		}
 
 	}
-	fmt.Println(m.gpuUid)
-	fmt.Println(m.count)
-	fmt.Println(m.memInfo["GPU-7f99cfd5-a48a-0aa5-0662-7bf02b024796"].Total)
 
 }
 
@@ -101,12 +98,12 @@ func (m *GpuInfo) CreateCRD(hostname string) {
 				Namespace: GPUCRDNamespace,
 			},
 			Spec: v1.GPUSpec{
-				UUID: m.gpuUid[i],
-				//Model:  *device.Model,
-				//Family: getArchFamily(*device.CudaComputeCapability.Major, *device.CudaComputeCapability.Minor),
+				UUID:   m.gpuUid[i],
+				Model:  "ff",
+				Family: "tesla",
 				Capacity: v1.R{
 					Core:   "100",
-					Memory: strconv.Itoa(int(m.memInfo[m.gpuUid[i]].Total)),
+					Memory: strconv.Itoa(int(m.memInfo[m.gpuUid[i]].Total / 268435456)),
 				},
 				Used: v1.R{
 					Core:   "0",
@@ -115,8 +112,9 @@ func (m *GpuInfo) CreateCRD(hostname string) {
 				Node: hostname,
 			},
 		}
-
+		fmt.Println(gpu)
 		jb, err := json.Marshal(gpu)
+		fmt.Println(string(jb))
 		if err != nil {
 			log.Fatalf("Failed to marshal gpu struct, %s.", err)
 		}

@@ -76,7 +76,7 @@ func (m *KubeMessenger) UpdatePodAnnotations(pod *v1.Pod) error {
 	return nil
 }
 
-func (m *KubeMessenger) getPodOnNode(nameSpace string, podName string) *v1.Pod {
+func (m *KubeMessenger) GetPodOnNode(nameSpace string, podName string) *v1.Pod {
 	podByteInfo, err := m.Client.GetResource("Pod", nameSpace, podName)
 	if err != nil {
 		fmt.Println("getpodByteInfo error")
@@ -98,6 +98,7 @@ func (m *KubeMessenger) GetPendingPodOnNode() []*v1.Pod {
 	if err != nil {
 		return nil
 	}
+
 	var podList v1.PodList
 	err = json.Unmarshal(podByteList, &podList)
 	if err != nil {
