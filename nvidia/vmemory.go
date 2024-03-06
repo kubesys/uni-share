@@ -3,11 +3,12 @@ package nvidia
 import (
 	"context"
 	"fmt"
-	"managerGo/deviceInfo"
 	"net"
 	"os"
 	"path/filepath"
 	"syscall"
+	"uni-share/deviceInfo"
+	"uni-share/podWatch"
 
 	"google.golang.org/grpc"
 	pluginapi "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
@@ -23,8 +24,8 @@ type VmemResourceServer struct {
 var _ pluginapi.DevicePluginServer = &VmemResourceServer{}
 var _ ResourceServer = &VmemResourceServer{}
 
-func NewVmemResourceServer(devInfo *deviceInfo.GpuInfo, socketName string) *VmemResourceServer {
-	socketFile := filepath.Join(pluginapi.DevicePluginPath, socketName)
+func NewVmemResourceServer(kubeMessenger *podWatch.KubeMessenger, devInfo *deviceInfo.GpuInfo) ResourceServer {
+	socketFile := filepath.Join(pluginapi.DevicePluginPath, NvidiaMemSocketName)
 
 	return &VmemResourceServer{
 		devInfo:      devInfo,

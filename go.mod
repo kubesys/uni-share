@@ -1,4 +1,4 @@
-module managerGo
+module uni-share
 
 go 1.19
 

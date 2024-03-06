@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"managerGo/podWatch"
-	"managerGo/vcuda"
 	"net"
 	"os"
 	"path/filepath"
@@ -15,6 +13,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"uni-share/podWatch"
+	"uni-share/vcuda"
 	"unsafe"
 
 	"github.com/kubesys/client-go/pkg/kubesys"

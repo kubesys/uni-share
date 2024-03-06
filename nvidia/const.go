@@ -26,6 +26,11 @@ const (
 
 	/** 256MB */
 	MemoryBlockSize = 268435456
+
+	CambriconCoreSocketName = "mlucore.scok"
+	CambriconMemSocketName  = "mlumem.sock"
+	NvidiaCoreSocketName    = "nvidiacore.sock"
+	NvidiaMemSocketName     = "nvidiamem.sock"
 )
 
 var (

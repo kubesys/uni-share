@@ -3,14 +3,14 @@ package main
 import (
 	"fmt"
 	"log"
-	"managerGo/deviceInfo"
-	"managerGo/nvidia"
-	"managerGo/podWatch"
 	"net"
 	"os"
 	"path"
 	"syscall"
 	"time"
+	"uni-share/deviceInfo"
+	"uni-share/nvidia"
+	"uni-share/podWatch"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/kubesys/client-go/pkg/kubesys"
@@ -53,12 +53,13 @@ func main() {
 	//自己打上环境变量，从环境变量获取节点名称
 	//devInfo.CreateCRD("133.133.135.73")
 
-	vcoreServer := nvidia.NewVcoreResourceServer("core.sock", "doslab.io/gpu-core", mes, devInfo)
+	rscFactory := nvidia.NewresourceFactory()
+	vcoreServer, _ := rscFactory.CreateResource("nvidiaCore", mes, devInfo)
 	go vcoreServer.Run()
-	resourceSrv["1"] = vcoreServer
-	vmemServer := nvidia.NewVmemResourceServer(devInfo, "mem.sock")
+	vmemServer, _ := rscFactory.CreateResource("nvinvidiaMem", mes, devInfo)
 	go vmemServer.Run()
-	resourceSrv["2"] = vmemServer
+	resourceSrv[nvidia.NvidiaCoreSocketName] = vcoreServer
+	resourceSrv[nvidia.NvidiaMemSocketName] = vmemServer
 
 	//结束处理
 	sigChan := nvidia.NewOSWatcher(syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM) //注册信号处理函数，接受到这几个信号将信号通知发送给sigChan
@@ -86,7 +87,7 @@ restart:
 
 	}
 
-	err = registerToKubelet(vcoreServer, vmemServer)
+	err = registerToKubelet()
 	if err != nil {
 		serverFlag = false
 		goto restart
@@ -107,7 +108,7 @@ restart:
 	}
 }
 
-func registerToKubelet(vcoreServer *nvidia.VcoreResourceServer, vmemServer *nvidia.VmemResourceServer) error {
+func registerToKubelet() error {
 	socketFile := "/var/lib/kubelet/device-plugins/kubelet.sock"
 	dialOptions := []grpc.DialOption{grpc.WithInsecure(), grpc.WithDialer(UnixDial), grpc.WithBlock(), grpc.WithTimeout(time.Second * 5)}
 

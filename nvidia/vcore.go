@@ -4,13 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"managerGo/deviceInfo"
-	"managerGo/podWatch"
 	"net"
 	"os"
 	"path/filepath"
 	"syscall"
 	"time"
+	"uni-share/deviceInfo"
+	"uni-share/podWatch"
 
 	"google.golang.org/grpc"
 	v1 "k8s.io/api/core/v1"
@@ -34,14 +34,14 @@ type VcoreResourceServer struct {
 var _ pluginapi.DevicePluginServer = &VcoreResourceServer{} //检测是否实现了ListAndWatch等接口
 var _ ResourceServer = &VcoreResourceServer{}               //检测是否实现了SocketName等接口
 
-func NewVcoreResourceServer(coreSocketName string, resourceName string, kubeMessenger *podWatch.KubeMessenger, devInfo *deviceInfo.GpuInfo) *VcoreResourceServer {
-	socketFile := filepath.Join("/var/lib/kubelet/device-plugins/", coreSocketName)
+func NewVcoreResourceServer(kubeMessenger *podWatch.KubeMessenger, devInfo *deviceInfo.GpuInfo) ResourceServer {
+	socketFile := filepath.Join("/var/lib/kubelet/device-plugins/", NvidiaCoreSocketName)
 
 	return &VcoreResourceServer{
 		kubeMessenger: kubeMessenger,
 		//srv:           grpc.NewServer(),
 		socketFile:   socketFile,
-		resourceName: resourceName,
+		resourceName: ResourceCore,
 		devInfo:      devInfo,
 	}
 }
