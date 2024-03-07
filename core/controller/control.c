@@ -19,7 +19,7 @@
  */
 
 
-
+#include "monitor.h"
 
 static void *source_control() {
 	int up_limit = 20;
@@ -28,7 +28,7 @@ static void *source_control() {
 	__uint32_t container_total_uti = 0;
 
 	while(1) {
-		container_total_uti = get_uti(); 
+		container_total_uti = get_uti("mlu"); 
 		printf("container_total_uti is %d%%\n", container_total_uti);
 		
 			if (container_total_uti < up_limit / 10) {
@@ -73,4 +73,25 @@ static void change_token(int delta) {
       mlu_cores_after = total_mlu_cores;
     }
   } while (!CAS(&cur_mlu_cores, mlu_cores_before, mlu_cores_after));
+}
+
+static void rate_limiter(int grids, int blocks) {
+  int before_mlu_cores = 0;
+  int after_mlu_cores = 0;
+  int kernel_size = grids * blocks;
+
+  LOGGER(5, "grid: %d, blocks: %d", grids, blocks);
+  LOGGER(5, "launch kernel %d, curr core: %d", kernel_size, cur_mlu_cores);
+
+    do {
+      CHECK:
+      before_mlu_cores = cur_mlu_cores;
+      LOGGER(8, "current core: %d", cur_mlu_cores);
+      if (before_mlu_cores < 0) {
+        nanosleep(&g_cycle, NULL);
+        goto CHECK;
+      }
+      after_mlu_cores = before_mlu_cores - kernel_size;
+    } while (!CAS(&cur_mlu_cores, before_mlu_cores, after_mlu_cores));
+
 }
