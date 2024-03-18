@@ -1,4 +1,4 @@
-package nvidia
+package register
 
 import (
 	"context"

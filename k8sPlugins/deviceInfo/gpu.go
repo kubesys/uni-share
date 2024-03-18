@@ -8,7 +8,6 @@ import (
 
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	"github.com/kubesys/client-go/pkg/kubesys"
-	v1 "github.com/pttq/kube-gpu/pkg/apis/doslab.io/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -88,7 +87,7 @@ func (m *GpuInfo) GetMemInfo() map[string]nvml.Memory {
 
 func (m *GpuInfo) CreateCRD(hostname string) {
 	for i := 0; i < m.count; i++ {
-		gpu := v1.GPU{
+		gpu := GPU{
 			TypeMeta: metav1.TypeMeta{
 				Kind:       "GPU",
 				APIVersion: GPUCRDAPIVersion,
@@ -97,15 +96,15 @@ func (m *GpuInfo) CreateCRD(hostname string) {
 				Name:      fmt.Sprintf("%s-gpu-%d", hostname, i),
 				Namespace: GPUCRDNamespace,
 			},
-			Spec: v1.GPUSpec{
+			Spec: GPUSpec{
 				UUID:   m.gpuUid[i],
 				Model:  "ff",
 				Family: "tesla",
-				Capacity: v1.R{
+				Capacity: R{
 					Core:   "100",
 					Memory: strconv.Itoa(int(m.memInfo[m.gpuUid[i]].Total / 268435456)),
 				},
-				Used: v1.R{
+				Used: R{
 					Core:   "0",
 					Memory: "0",
 				},

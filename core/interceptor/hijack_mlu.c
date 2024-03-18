@@ -21,8 +21,14 @@
 
 #define _GNU_SOURCE
 #include "hijack.h"
+#include "monitor.h"
+#include "control.h"
+#include "container.h"
 
 pthread_once_t mlu_lib_ptr_init = PTHREAD_ONCE_INIT;
+pthread_once_t mlu_prod = PTHREAD_ONCE_INIT;
+pthread_once_t reg = PTHREAD_ONCE_INIT;
+cn_uint64_t total_mem = 0;
 
 entry_t CNDrv_entry[] = {
 	{.name = "cnGetErrorString"},
@@ -230,10 +236,12 @@ void getMluDriverLibPtrDlsym(){
 __CN_EXPORT CNresult cnInit(unsigned int flags) {
 	printf("hijcaking cnInit\n");
 	CNresult ret;
-	//pthread_once(&lib_ptr_init, getDriverLibPtr);
-	//pthread_once(&ctl_init, init);
+	read_controller_configuration();
+	pthread_once(&mlu_lib_ptr_init, getMluDriverLibPtrDlsym);
+	pthread_once(&mlu_prod, create_prod_mlu_thread);
+	
 
-	ret = MY_CALL_ENTRY(REAL_FUNC_PTR(cnInit), flags);
+	ret = MY_CALL_ENTRY(REAL_MLU_FUNC_PTR(cnInit), flags);
 
 	return ret;
 }
@@ -242,10 +250,11 @@ __CN_EXPORT CNresult cnGetLibVersion(int *major, int *minor, int *patch){
 	CNresult ret;
 	
 	//printf("hijcaking cnGetLibVersion\n");
-	//pthread_once(&lib_ptr_init, getDriverLibPtr);
-	//pthread_once(&ctl_init, init);
+	read_controller_configuration();
+	pthread_once(&mlu_lib_ptr_init, getMluDriverLibPtrDlsym);
+	pthread_once(&mlu_prod, create_prod_mlu_thread);
 	
-	ret = MY_CALL_ENTRY(REAL_FUNC_PTR(cnGetLibVersion), major, minor, patch);
+	ret = MY_CALL_ENTRY(REAL_MLU_FUNC_PTR(cnGetLibVersion), major, minor, patch);
 
 	return ret;
 }
@@ -253,78 +262,109 @@ __CN_EXPORT CNresult cnGetLibVersion(int *major, int *minor, int *patch){
 __CN_EXPORT CNresult cnGetExportFunction(const char *name, const void **func) {
 	CNresult ret;
 	printf("hijacking cnGetExportFunction,want %s 's fptr\n", name);
+	read_controller_configuration();
 	pthread_once(&mlu_lib_ptr_init, getMluDriverLibPtrDlsym);
-    //pthread_once(&ctl_init, init);
-	ret = MY_CALL_ENTRY(REAL_FUNC_PTR(cnGetExportFunction), name, func);
+    pthread_once(&mlu_prod, create_prod_mlu_thread);
+	ret = MY_CALL_ENTRY(REAL_MLU_FUNC_PTR(cnGetExportFunction), name, func);
 	
 	return ret;
 }
 
-// __CN_EXPORT CNresult cnDeviceGetCount(int *pcount){
-// 	CNresult ret;
-// 	//printf("hijcaking cnDeviceGetCount\n");
-
-// 	ret = MY_CALL_ENTRY(REAL_FUNC_PTR(cnDeviceGetCount), pcount);
-
-// 	return ret;
-// }
-
 
 //Memory Management
 /*ptotalBytes这里应该返回指定配额*/
-// __CN_EXPORT CNresult cnMemGetInfo(cn_uint64_t *pfreeBytes, cn_uint64_t *ptotalBytes) {
-// 	CNresult ret;
-// 	//printf("hijacking cnMemGetInfo\n");
-// 	ret = MY_CALL_ENTRY(REAL_FUNC_PTR(cnMemGetInfo), pfreeBytes, ptotalBytes);
-// 	return ret;
-// }
+__CN_EXPORT CNresult cnMemGetInfo(cn_uint64_t *pfreeBytes, cn_uint64_t *ptotalBytes) {
+	CNresult ret;
+	cn_uint64_t use = 0;
+
+	ret = MY_CALL_ENTRY(REAL_MLU_FUNC_PTR(cnMemGetInfo), pfreeBytes, ptotalBytes);
+	*ptotalBytes = total_mem;
+	use = get_mlu_mem();
+	*pfreeBytes = total_mem - use;
+
+	return ret;
+}
 
 
 __CN_EXPORT CNresult cnMalloc(CNaddr *pmluAddr, cn_uint64_t bytes) {
 	CNresult ret;
-	cn_int64_t request_bytes = bytes; 
+	cn_uint64_t request_bytes = bytes; 
+	cn_uint64_t use = 0;
 
-	//printf("hijacking cnMalloc\n");
 
 	//获取容器内所有进程使用已使用的内存和配额比较
-//	use = xxx;
-//	if (use + request_bytes >= total_mem){
-//		ret = CN_MEMORY_ERROR_OUT_OF_MEMORY; 
-//		goto DONE;
-//	}
+	use = get_mlu_mem();
+	if (use + request_bytes >= total_mem){
+		ret = CN_MEMORY_ERROR_OUT_OF_MEMORY; 
+		goto DONE;
+	}
 		
-	ret = MY_CALL_ENTRY(REAL_FUNC_PTR(cnMalloc), pmluAddr, bytes);
+	ret = MY_CALL_ENTRY(REAL_MLU_FUNC_PTR(cnMalloc), pmluAddr, bytes);
 
 DONE:	
 	return ret;
 }
 
-// __CN_EXPORT CNresult cnMallocSecurity(CNaddr *pmluAddr, cn_uint64_t bytes) {
-// 	CNresult ret;
-// 	//printf("hijacking cnMallocSecurity\n");
-// 	ret = MY_CALL_ENTRY(REAL_FUNC_PTR(cnMallocSecurity), pmluAddr, bytes);
-// 	return ret;
-// }
+__CN_EXPORT CNresult cnMallocSecurity(CNaddr *pmluAddr, cn_uint64_t bytes) {
+	CNresult ret;
+	cn_uint64_t request_bytes = bytes; 
+	cn_uint64_t use = 0;
+	//printf("hijacking cnMallocSecurity\n");
 
-// __CN_EXPORT CNresult cnZmalloc(CNaddr *pmluAddr, cn_uint64_t bytes) {
-// 	CNresult ret;
-// 	//printf("hijacking cnZmalloc\n");
-// 	ret = MY_CALL_ENTRY(REAL_FUNC_PTR(cnZmalloc), pmluAddr, bytes);
-// 	return ret;
-// }
+	use = get_mlu_mem();
+	if (use + request_bytes >= total_mem){
+		ret = CN_MEMORY_ERROR_OUT_OF_MEMORY; 
+		goto DONE;
+	}
 
-// __CN_EXPORT CNresult cnMallocConstant(CNaddr *pmluAddr, cn_uint64_t bytes) {
-// 	CNresult ret;
-// 	//printf("hijacking cnMallocConstant\n");
-// 	ret = MY_CALL_ENTRY(REAL_FUNC_PTR(cnMallocConstant), pmluAddr, bytes);
-// 	return ret;
-// }
+	ret = MY_CALL_ENTRY(REAL_MLU_FUNC_PTR(cnMallocSecurity), pmluAddr, bytes);
+
+DONE:
+	return ret;
+}
+
+__CN_EXPORT CNresult cnZmalloc(CNaddr *pmluAddr, cn_uint64_t bytes) {
+	CNresult ret;
+	cn_uint64_t request_bytes = bytes; 
+	cn_uint64_t use = 0;
+	//printf("hijacking cnZmalloc\n");
+
+
+	use = get_mlu_mem();
+	if (use + request_bytes >= total_mem){
+		ret = CN_MEMORY_ERROR_OUT_OF_MEMORY; 
+		goto DONE;
+	}
+
+	ret = MY_CALL_ENTRY(REAL_MLU_FUNC_PTR(cnZmalloc), pmluAddr, bytes);
+
+DONE:	
+	return ret;
+}
+
+__CN_EXPORT CNresult cnMallocConstant(CNaddr *pmluAddr, cn_uint64_t bytes) {
+	CNresult ret;
+	cn_uint64_t request_bytes = bytes; 
+	cn_uint64_t use = 0;
+	//printf("hijacking cnMallocConstant\n");
+
+	use = get_mlu_mem();
+	if (use + request_bytes >= total_mem){
+		ret = CN_MEMORY_ERROR_OUT_OF_MEMORY; 
+		goto DONE;
+	}
+
+	ret = MY_CALL_ENTRY(REAL_MLU_FUNC_PTR(cnMallocConstant), pmluAddr, bytes);
+
+DONE:	
+	return ret;
+}
 
 // /*cpu和gpu共享内存？*/
 // __CN_EXPORT CNresult cnMallocPeerAble(CNaddr *pmluAddr, cn_uint64_t bytes) {
 // 	CNresult ret;
 // 	//printf("hijacking cnMallocPeerAble\n");
-// 	ret = MY_CALL_ENTRY(REAL_FUNC_PTR(cnMallocPeerAble), pmluAddr, bytes);
+// 	ret = MY_CALL_ENTRY(REAL_MLU_FUNC_PTR(cnMallocPeerAble), pmluAddr, bytes);
 // 	return ret;
 // }
 
@@ -333,35 +373,35 @@ DONE:
 //                                              int node) {
 // 	CNresult ret;
 // 	//printf("hijacking cnMemGetNodeInfo\n");
-// 	ret = MY_CALL_ENTRY(REAL_FUNC_PTR(cnMemGetNodeInfo), pfreeBytes, ptotalBytes, node);
+// 	ret = MY_CALL_ENTRY(REAL_MLU_FUNC_PTR(cnMemGetNodeInfo), pfreeBytes, ptotalBytes, node);
 // 	return ret;
 // }
 
 // __CN_EXPORT CNresult cnMallocNode(CNaddr *pmluAddr, cn_uint64_t bytes, int node) {
 // 	CNresult ret;
 // 	//printf("hijacking cnMallocNode\n");
-// 	ret = MY_CALL_ENTRY(REAL_FUNC_PTR(cnMallocNode), pmluAddr, bytes, node);
+// 	ret = MY_CALL_ENTRY(REAL_MLU_FUNC_PTR(cnMallocNode), pmluAddr, bytes, node);
 // 	return ret;
 // }
 
 // __CN_EXPORT CNresult cnZmallocNode(CNaddr *pmluAddr, cn_uint64_t bytes, int node) {
 // 	CNresult ret;
 // 	//printf("hijacking cnZmallocNode\n");
-// 	ret = MY_CALL_ENTRY(REAL_FUNC_PTR(cnZmallocNode), pmluAddr, bytes, node);
+// 	ret = MY_CALL_ENTRY(REAL_MLU_FUNC_PTR(cnZmallocNode), pmluAddr, bytes, node);
 // 	return ret;
 // }
 
 // __CN_EXPORT CNresult cnMallocNodeConstant(CNaddr *pmluAddr, cn_uint64_t bytes, int node) {
 // 	CNresult ret;
 // 	//printf("hijacking cnMallocNodeConstant\n");
-// 	ret = MY_CALL_ENTRY(REAL_FUNC_PTR(cnMallocNodeConstant), pmluAddr, bytes, node);
+// 	ret = MY_CALL_ENTRY(REAL_MLU_FUNC_PTR(cnMallocNodeConstant), pmluAddr, bytes, node);
 // 	return ret;
 // }
 
 // __CN_EXPORT CNresult cnMallocFrameBuffer(CNaddr *pmluAddr, cn_uint64_t bytes, int node) {
 // 	CNresult ret;
 // 	//printf("hijacking cnMallocFrameBuffer\n");
-// 	ret = MY_CALL_ENTRY(REAL_FUNC_PTR(cnMallocFrameBuffer), pmluAddr, bytes, node);
+// 	ret = MY_CALL_ENTRY(REAL_MLU_FUNC_PTR(cnMallocFrameBuffer), pmluAddr, bytes, node);
 // 	return ret;
 // }
 
@@ -377,8 +417,20 @@ __CN_EXPORT CNresult cnInvokeKernel(CNkernel hkernel, unsigned int dimx, unsigne
                                            unsigned int dimz, KernelClass c, unsigned int reserve,
                                            CNqueue hqueue, void **kernelParams, void **extra) {
 	CNresult ret;
-	//printf("hijacking cnInvokeKernel\n");
-	//rate_limiter(dimx * dimy, dimx * dimy * dimz);
-	ret = MY_CALL_ENTRY(REAL_FUNC_PTR(cnInvokeKernel), hkernel, dimx, dimy, dimz, c, reserve, hqueue, kernelParams, extra);
+	printf("hijacking cnInvokeKernel\n");
+	rate_limiter(dimx * dimy, dimx * dimy * dimz);
+	ret = MY_CALL_ENTRY(REAL_MLU_FUNC_PTR(cnInvokeKernel), hkernel, dimx, dimy, dimz, c, reserve, hqueue, kernelParams, extra);
 	return ret;
+}
+
+void create_prod_mlu_thread() {
+	pthread_t s_ctl;
+	int ret;
+	const char *acce_type = "mlu";
+
+	ret = pthread_create(&s_ctl, NULL, source_control, (void*)acce_type);
+	if (ret !=0) {
+		perror("mlu pthread_create");
+        exit(EXIT_FAILURE);
+	}
 }

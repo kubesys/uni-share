@@ -17,9 +17,12 @@
  *         wuheng@iscas.ac.cn
  * since:  0.1
  */
+#include "monitor.h"
+
 int card_core_count = 0;
 int total_mlu_cores = 0;
 int card_thread_pre_core = 256;
+
 
 void initCndev() {
     cndevDevice_t devHandle;
@@ -71,11 +74,11 @@ __uint32_t get_mlu_uti() {
         cndevCheckErrors(ret);
         //printf("process: count: %d\n", pCount);
         for (unsigned int i = 0; i < pCount; i++) {
-          // printf("process %d:pid:%u, IPU Util:%u %%, JPU Util:%u %%, VPU Decoder Util:%u %%, VPU Encoder Util:%u %%, Memory Util:%u %%\n",
-          //       i, (procUtil+i)->pid, (procUtil + i)->ipuUtil, (procUtil + i)->jpuUtil,
-          //       (procUtil + i)->vpuDecUtil,
-          //       (procUtil + i)->vpuEncUtil,
-          //       (procUtil + i)->memUtil);
+          printf("process %d:pid:%u, IPU Util:%u %%, JPU Util:%u %%, VPU Decoder Util:%u %%, VPU Encoder Util:%u %%, Memory Util:%u %%\n",
+                i, (procUtil+i)->pid, (procUtil + i)->ipuUtil, (procUtil + i)->jpuUtil,
+                (procUtil + i)->vpuDecUtil,
+                (procUtil + i)->vpuEncUtil,
+                (procUtil + i)->memUtil);
       container_total_uti += (procUtil+i)->ipuUtil;
         }
 
@@ -83,4 +86,35 @@ __uint32_t get_mlu_uti() {
       free(procUtil);
 
     return container_total_uti;
+}
+
+cn_uint64_t get_mlu_mem() {
+    cn_uint64_t proc_used_mem = 0;
+      // get card[x]'s process info
+    // in most cases, the number of processes running on a card will not exceed 10
+    // but if cndevProcessInfo's space is not enough, CNDEV_ERROR_INSUFFICIENT_SPACE will be returned
+    unsigned tCount = 10;
+    cndevProcessInfo_t *procInfo = NULL;
+    procInfo = (cndevProcessInfo_t *) malloc(tCount * sizeof(cndevProcessInfo_t));
+    procInfo->version = CNDEV_VERSION_5;
+    ret = cndevGetProcessInfo(&tCount, procInfo, devHandle);
+    // if ret is CNDEV_ERROR_INSUFFICIENT_SPACE, should get again
+    while (ret == CNDEV_ERROR_INSUFFICIENT_SPACE) {
+      procInfo = (cndevProcessInfo_t *) realloc(procInfo, tCount * sizeof(cndevProcessInfo_t));
+      ret = cndevGetProcessInfo(&tCount, procInfo, devHandle);
+    }
+    cndevCheckErrors(ret);
+    printf("process: count: %d\n", tCount);
+
+    for (unsigned int i = 0; i < tCount; i++) {
+      printf("process %d:pid:%u, PhyMem:%luKiB, VirMem:%luKiB\n",
+             i,
+             (procInfo + i)->pid,
+             (procInfo + i)->physicalMemoryUsed,
+             (procInfo + i)->virtualMemoryUsed);
+      proc_used_mem += (procInfo + i)->physicalMemoryUsed;
+    }
+    free(procInfo);
+
+    return proc_used_mem;
 }

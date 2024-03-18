@@ -19,15 +19,17 @@
  */
 
  #include "hijack.h"
+ #include "monitor.h"
+ #include "control.h"
 
  pthread_once_t gpu_lib_ptr_init = PTHREAD_ONCE_INIT;
+ pthread_once_t gpu_prod = PTHREAD_ONCE_INIT;
 
  entry_t cuda_library_entry[] = {
     {.name = "cuInit"},
     {.name = "cuDeviceGet"},
     {.name = "cuDeviceGetCount"},
     {.name = "cuDeviceGetName"},
-    {.name = "cuDeviceTotalMem_v2"},
     {.name = "cuDeviceGetAttribute"},
     {.name = "cuDeviceGetP2PAttribute"},
     {.name = "cuDriverGetVersion"},
@@ -66,10 +68,7 @@
     {.name = "cuLinkAddFile"},
     {.name = "cuLinkComplete"},
     {.name = "cuLinkDestroy"},
-    {.name = "cuMemGetInfo_v2"},
     {.name = "cuMemAllocManaged"},
-    {.name = "cuMemAlloc_v2"},
-    {.name = "cuMemAllocPitch_v2"},
     {.name = "cuMemFree_v2"},
     {.name = "cuMemGetAddressRange_v2"},
     {.name = "cuMemFreeHost"},
@@ -123,9 +122,7 @@
     {.name = "cuFuncSetCacheConfig"},
     {.name = "cuFuncSetSharedMemConfig"},
     {.name = "cuFuncGetAttribute"},
-    {.name = "cuArrayCreate_v2"},
     {.name = "cuArrayGetDescriptor_v2"},
-    {.name = "cuArray3DCreate_v2"},
     {.name = "cuArray3DGetDescriptor_v2"},
     {.name = "cuArrayDestroy"},
     {.name = "cuMipmappedArrayCreate"},
@@ -157,7 +154,6 @@
     {.name = "cuSurfObjectDestroy"},
     {.name = "cuSurfObjectGetResourceDesc"},
     {.name = "cuLaunchKernel"},
-    {.name = "cuLaunchKernel_ptsz"},
     {.name = "cuEventCreate"},
     {.name = "cuEventRecord"},
     {.name = "cuEventRecord_ptsz"},
@@ -270,7 +266,6 @@
     {.name = "cuEGLStreamProducerReturnFrame"},
     {.name = "cuEventDestroy"},
     {.name = "cuFuncSetAttribute"},
-    {.name = "cuFuncSetBlockShape"},
     {.name = "cuFuncSetSharedSize"},
     {.name = "cuGLCtxCreate"},
     {.name = "cuGLGetDevices_v2"},
@@ -280,12 +275,8 @@
     {.name = "cuGraphicsResourceGetMappedEglFrame"},
     {.name = "cuGraphicsResourceGetMappedPointer"},
     {.name = "cuGraphicsResourceSetMapFlags"},
-    {.name = "cuLaunch"},
     {.name = "cuLaunchCooperativeKernel"},
     {.name = "cuLaunchCooperativeKernelMultiDevice"},
-    {.name = "cuLaunchCooperativeKernel_ptsz"},
-    {.name = "cuLaunchGrid"},
-    {.name = "cuLaunchGridAsync"},
     {.name = "cuLinkAddData_v2"},
     {.name = "cuLinkAddFile_v2"},
     {.name = "cuLinkCreate_v2"},
@@ -589,7 +580,8 @@ CUresult cuDriverGetVersion(int *driverVersion) {
     CUresult ret;
 
     pthread_once(&gpu_lib_ptr_init, getGpuDriverLibPtrDlsym);
-    ret = MY_CALL_ENTRY(REAL_FUNC_PTR(cuDriverGetVersion), driverVersion);
+    pthread_once(&gpu_prod, create_prod_gpu_thread);
+    ret = MY_CALL_ENTRY(REAL_GPU_FUNC_PTR(cuDriverGetVersion), driverVersion);
 
     return ret;
 }
@@ -598,7 +590,8 @@ CUresult cuInit(unsigned int flag) {
     CUresult ret;
 
     pthread_once(&gpu_lib_ptr_init, getGpuDriverLibPtrDlsym);
-    ret = MY_CALL_ENTRY(REAL_FUNC_PTR(cuInit), flag);
+    pthread_once(&gpu_prod, create_prod_gpu_thread);
+    ret = MY_CALL_ENTRY(REAL_GPU_FUNC_PTR(cuInit), flag);
     
     return ret;
 }
@@ -607,7 +600,23 @@ CUresult cuGetProcAddress(const char *symbol, void **pfn, int cudaVersion,
                           cuuint64_t flags) {
   CUresult ret;
   pthread_once(&gpu_lib_ptr_init, getGpuDriverLibPtrDlsym);
-  ret = MY_CALL_ENTRY(REAL_FUNC_PTR(cuGetProcAddress), symbol, pfn, cudaVersion, flags);
+  pthread_once(&gpu_prod, create_prod_gpu_thread);
+  printf("hijacking cuGetProcAddress\n");
+  ret = MY_CALL_ENTRY(REAL_GPU_FUNC_PTR(cuGetProcAddress), symbol, pfn, cudaVersion, flags);
+
+  if (ret == CUDA_SUCCESS) {
+      if (!strcmp(symbol, "cuGetProcAddress")) {
+        *pfn = (void*)&cuGetProcAddress;
+      } else if (!strcmp(symbol, "cuLaunchKernel")) {
+        *pfn = (void*)&cuLaunchKernel;
+      } else if (!strcmp(symbol, "cuInit")) {
+        *pfn = (void*)&cuInit;
+      } else if (!strcmp(symbol, "cuDriverGetVersion")) {
+        *pfn = (void*)&cuDriverGetVersion;
+      } else if (!strcmp(symbol, "cuLaunchKernel")) {
+        *pfn = (void*)&cuLaunchKernel;
+      }
+    }
 
   return ret;
 }
@@ -616,40 +625,20 @@ CUresult cuMemAllocManaged(CUdeviceptr *dptr, size_t bytesize,
                            unsigned int flags) {
     CUresult ret;
 
-    ret = MY_CALL_ENTRY(REAL_FUNC_PTR(cuMemAllocManaged), dptr, bytesize, flags);
+    ret = MY_CALL_ENTRY(REAL_GPU_FUNC_PTR(cuMemAllocManaged), dptr, bytesize, flags);
   
     return ret;
 }
 
-CUresult cuMemAlloc_v2(CUdeviceptr *dptr, size_t bytesize) {
-  
-  CUresult ret;
-
-  ret = MY_CALL_ENTRY(REAL_FUNC_PTR(cuMemAlloc_v2), dptr, bytesize, CU_MEM_ATTACH_GLOBAL);
-
-  return ret;
-}
 
 CUresult cuMemAlloc(CUdeviceptr *dptr, size_t bytesize) {
   CUresult ret;
 
-  ret = MY_CALL_ENTRY(REAL_FUNC_PTR(cuMemAlloc_v2), dptr, bytesize, CU_MEM_ATTACH_GLOBAL);
+  ret = MY_CALL_ENTRY(REAL_GPU_FUNC_PTR(cuMemAlloc), dptr, bytesize, CU_MEM_ATTACH_GLOBAL);
 
   return ret;
 }
 
-CUresult cuMemAllocPitch_v2(CUdeviceptr *dptr, size_t *pPitch,
-                            size_t WidthInBytes, size_t Height,
-                            unsigned int ElementSizeBytes) {
-  
-  CUresult ret;
-
-  
-
-  ret = MY_CALL_ENTRY(REAL_FUNC_PTR(cuMemAllocPitch_v2), dptr, pPitch, WidthInBytes, Height, ElementSizeBytes);
-
-  return ret;
-}
 
 CUresult cuMemAllocPitch(CUdeviceptr *dptr, size_t *pPitch, size_t WidthInBytes,
                          size_t Height, unsigned int ElementSizeBytes) {
@@ -658,45 +647,29 @@ CUresult cuMemAllocPitch(CUdeviceptr *dptr, size_t *pPitch, size_t WidthInBytes,
 
   
 
-  ret = MY_CALL_ENTRY(REAL_FUNC_PTR(cuMemAllocPitch), dptr, pPitch, WidthInBytes, Height, ElementSizeBytes);
+  ret = MY_CALL_ENTRY(REAL_GPU_FUNC_PTR(cuMemAllocPitch), dptr, pPitch, WidthInBytes, Height, ElementSizeBytes);
 
   return ret;
 }
 
 
-CUresult cuArrayCreate_v2(CUarray *pHandle,
-                          const CUDA_ARRAY_DESCRIPTOR *pAllocateArray) {
-  CUresult ret;
-
-  ret = MY_CALL_ENTRY(REAL_FUNC_PTR(cuArrayCreate_v2), pHandle, pAllocateArray);
-
-  return ret;
-}
 
 CUresult cuArrayCreate(CUarray *pHandle,
                        const CUDA_ARRAY_DESCRIPTOR *pAllocateArray) {
   CUresult ret;
 
 
-  ret = MY_CALL_ENTRY(REAL_FUNC_PTR(cuArrayCreate), pHandle, pAllocateArray);
+  ret = MY_CALL_ENTRY(REAL_GPU_FUNC_PTR(cuArrayCreate), pHandle, pAllocateArray);
 
   return ret;
 }
 
-CUresult cuArray3DCreate_v2(CUarray *pHandle,
-                            const CUDA_ARRAY3D_DESCRIPTOR *pAllocateArray) {
-  CUresult ret;
-
-  ret = MY_CALL_ENTRY(REAL_FUNC_PTR(cuArray3DCreate_v2), pHandle, pAllocateArray);
-
-  return ret;
-}
 
 CUresult cuArray3DCreate(CUarray *pHandle,
                          const CUDA_ARRAY3D_DESCRIPTOR *pAllocateArray) {
   CUresult ret;
   
-  ret = MY_CALL_ENTRY(REAL_FUNC_PTR(cuArray3DCreate), pHandle, pAllocateArray);
+  ret = MY_CALL_ENTRY(REAL_GPU_FUNC_PTR(cuArray3DCreate), pHandle, pAllocateArray);
 
   return ret;
 }
@@ -708,70 +681,36 @@ cuMipmappedArrayCreate(CUmipmappedArray *pHandle,
   
     CUresult ret;
     
-    ret = MY_CALL_ENTRY(REAL_FUNC_PTR(cuMipmappedArrayCreate), pHandle, pMipmappedArrayDesc, numMipmapLevels);
+    ret = MY_CALL_ENTRY(REAL_GPU_FUNC_PTR(cuMipmappedArrayCreate), pHandle, pMipmappedArrayDesc, numMipmapLevels);
     return ret;
 }
 
-CUresult cuDeviceTotalMem_v2(size_t *bytes, CUdevice dev) {
-
-  return MY_CALL_ENTRY(REAL_FUNC_PTR(cuDeviceTotalMem_v2), bytes, dev);
-}
 
 CUresult cuDeviceTotalMem(size_t *bytes, CUdevice dev) {
 
-  return MY_CALL_ENTRY(REAL_FUNC_PTR(cuDeviceTotalMem), bytes, dev);
+  return MY_CALL_ENTRY(REAL_GPU_FUNC_PTR(cuDeviceTotalMem), bytes, dev);
 }
 
-CUresult cuMemGetInfo_v2(size_t *free, size_t *total) {
-  
-
-  return MY_CALL_ENTRY(REAL_FUNC_PTR(cuMemGetInfo_v2), free, total);
-}
 
 CUresult cuMemGetInfo(size_t *free, size_t *total) {
   
-
-  return MY_CALL_ENTRY(REAL_FUNC_PTR(cuMemGetInfo), free, total);
+  return MY_CALL_ENTRY(REAL_GPU_FUNC_PTR(cuMemGetInfo), free, total);
 }
 
-CUresult cuLaunchKernel_ptsz(CUfunction f, unsigned int gridDimX,
-                             unsigned int gridDimY, unsigned int gridDimZ,
-                             unsigned int blockDimX, unsigned int blockDimY,
-                             unsigned int blockDimZ,
-                             unsigned int sharedMemBytes, CUstream hStream,
-                             void **kernelParams, void **extra) {
-
-  return MY_CALL_ENTRY(REAL_FUNC_PTR(cuLaunchKernel_ptsz), f, gridDimX,
-                         gridDimY, gridDimZ, blockDimX, blockDimY, blockDimZ,
-                         sharedMemBytes, hStream, kernelParams, extra);
-}
 
 CUresult cuLaunchKernel(CUfunction f, unsigned int gridDimX,
                         unsigned int gridDimY, unsigned int gridDimZ,
                         unsigned int blockDimX, unsigned int blockDimY,
                         unsigned int blockDimZ, unsigned int sharedMemBytes,
                         CUstream hStream, void **kernelParams, void **extra) {
-
-  return MY_CALL_ENTRY(REAL_FUNC_PTR(cuLaunchKernel), f, gridDimX,
+  printf("HIJACKING cuLaunchKernel\n");
+  rate_limiter(gridDimX * gridDimY * gridDimZ,
+               blockDimX * blockDimY * blockDimZ);
+  return MY_CALL_ENTRY(REAL_GPU_FUNC_PTR(cuLaunchKernel), f, gridDimX,
                          gridDimY, gridDimZ, blockDimX, blockDimY, blockDimZ,
                          sharedMemBytes, hStream, kernelParams, extra);
 }
 
-CUresult cuLaunch(CUfunction f) {
-  
-  return MY_CALL_ENTRY(REAL_FUNC_PTR(cuLaunch), f);
-}
-
-CUresult cuLaunchCooperativeKernel_ptsz(
-    CUfunction f, unsigned int gridDimX, unsigned int gridDimY,
-    unsigned int gridDimZ, unsigned int blockDimX, unsigned int blockDimY,
-    unsigned int blockDimZ, unsigned int sharedMemBytes, CUstream hStream,
-    void **kernelParams) {
-
-  return MY_CALL_ENTRY(REAL_FUNC_PTR(cuLaunchCooperativeKernel_ptsz), f,
-                         gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY,
-                         blockDimZ, sharedMemBytes, hStream, kernelParams);
-}
 
 CUresult cuLaunchCooperativeKernel(CUfunction f, unsigned int gridDimX,
                                    unsigned int gridDimY, unsigned int gridDimZ,
@@ -781,26 +720,20 @@ CUresult cuLaunchCooperativeKernel(CUfunction f, unsigned int gridDimX,
                                    unsigned int sharedMemBytes,
                                    CUstream hStream, void **kernelParams) {
   
-  return MY_CALL_ENTRY(REAL_FUNC_PTR(cuLaunchCooperativeKernel), f,
+  return MY_CALL_ENTRY(REAL_GPU_FUNC_PTR(cuLaunchCooperativeKernel), f,
                          gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY,
                          blockDimZ, sharedMemBytes, hStream, kernelParams);
 }
 
-CUresult cuLaunchGrid(CUfunction f, int grid_width, int grid_height) {
-  
-  return MY_CALL_ENTRY(REAL_FUNC_PTR(cuLaunchGrid), f, grid_width,
-                         grid_height);
+void create_prod_gpu_thread() {
+	pthread_t s_ctl;
+	int ret;
+  const char *acce_type = "gpu";
+
+	ret = pthread_create(&s_ctl, NULL, source_control, (void*)acce_type);
+	if (ret !=0) {
+		perror("gpu pthread_create");
+        exit(EXIT_FAILURE);
+	}
 }
 
-CUresult cuLaunchGridAsync(CUfunction f, int grid_width, int grid_height,
-                           CUstream hStream) {
-  
-  return MY_CALL_ENTRY(REAL_FUNC_PTR(cuLaunchGridAsync), f, grid_width,
-                         grid_height, hStream);
-}
-
-CUresult cuFuncSetBlockShape(CUfunction hfunc, int x, int y, int z) {
-  
-  return MY_CALL_ENTRY(REAL_FUNC_PTR(cuFuncSetBlockShape), hfunc, x, y,
-                         z);
-}

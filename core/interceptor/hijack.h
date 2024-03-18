@@ -12,7 +12,12 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
+ *
+ * author: wuyangyang99@otcaix.iscas.ac.cn 
+ *         wuheng@iscas.ac.cn
+ * since:  0.1
  */
+
 #define _GNU_SOURCE
 #ifndef __HIJACK_H
 #define __HIJACK_H
@@ -23,9 +28,9 @@
 #include <string.h>
 #include <stdint.h>
 #include "cn_api.h"
-#include <cndev.h>
 #include <time.h>
 #include <pthread.h>
+#include <cuda.h>
 
 void *__libc_dlsym(void *map, const char *name);
 void *__libc_dlopen_mode(const char *name, int mode);
@@ -33,13 +38,16 @@ void *__libc_dlopen_mode(const char *name, int mode);
 void *real_dlsym(void *handle, const char *symbol);
 void getMluDriverLibPtrDlsym();
 void getGpuDriverLibPtrDlsym();
+void create_prod_gpu_thread();
+void create_prod_mlu_thread();
 
 typedef void *(*fnDlsym)(void *, const char *);
 
 #define MLU_ENTRY_ENUM(x) ENTRY_##x
-#define REAL_FUNC_PTR(x) ({ CNDrv_entry[MLU_ENTRY_ENUM(x)].func_ptr; })
+#define REAL_MLU_FUNC_PTR(x) ({ CNDrv_entry[MLU_ENTRY_ENUM(x)].func_ptr; })
 
 #define CUDA_ENTRY_ENUM(x) ENTRY_##x
+#define REAL_GPU_FUNC_PTR(x) ({ cuda_library_entry[CUDA_ENTRY_ENUM(x)].func_ptr; })
 
 //#define REAL_FUNC_PTR(table, x) ({ (table)[MLU_ENTRY_ENUM(x)].func_ptr; })
 //#define MY_CALL_ENTRY(ptr, params, ...) ({ ((CUresult (*)params)ptr)(__VA_ARGS__); })
@@ -288,8 +296,6 @@ typedef enum {
   CUDA_ENTRY_ENUM(cuDeviceGetCount),
   /** cuDeviceGetName */
   CUDA_ENTRY_ENUM(cuDeviceGetName),
-  /** cuDeviceTotalMem_v2 */
-  CUDA_ENTRY_ENUM(cuDeviceTotalMem_v2),
   /** cuDeviceGetAttribute */
   CUDA_ENTRY_ENUM(cuDeviceGetAttribute),
   /** cuDeviceGetP2PAttribute */
@@ -366,14 +372,8 @@ typedef enum {
   CUDA_ENTRY_ENUM(cuLinkComplete),
   /** cuLinkDestroy */
   CUDA_ENTRY_ENUM(cuLinkDestroy),
-  /** cuMemGetInfo_v2 */
-  CUDA_ENTRY_ENUM(cuMemGetInfo_v2),
   /** cuMemAllocManaged */
   CUDA_ENTRY_ENUM(cuMemAllocManaged),
-  /** cuMemAlloc_v2 */
-  CUDA_ENTRY_ENUM(cuMemAlloc_v2),
-  /** cuMemAllocPitch_v2 */
-  CUDA_ENTRY_ENUM(cuMemAllocPitch_v2),
   /** cuMemFree_v2 */
   CUDA_ENTRY_ENUM(cuMemFree_v2),
   /** cuMemGetAddressRange_v2 */
@@ -480,12 +480,8 @@ typedef enum {
   CUDA_ENTRY_ENUM(cuFuncSetSharedMemConfig),
   /** cuFuncGetAttribute */
   CUDA_ENTRY_ENUM(cuFuncGetAttribute),
-  /** cuArrayCreate_v2 */
-  CUDA_ENTRY_ENUM(cuArrayCreate_v2),
   /** cuArrayGetDescriptor_v2 */
   CUDA_ENTRY_ENUM(cuArrayGetDescriptor_v2),
-  /** cuArray3DCreate_v2 */
-  CUDA_ENTRY_ENUM(cuArray3DCreate_v2),
   /** cuArray3DGetDescriptor_v2 */
   CUDA_ENTRY_ENUM(cuArray3DGetDescriptor_v2),
   /** cuArrayDestroy */
@@ -548,8 +544,6 @@ typedef enum {
   CUDA_ENTRY_ENUM(cuSurfObjectGetResourceDesc),
   /** cuLaunchKernel */
   CUDA_ENTRY_ENUM(cuLaunchKernel),
-  /** cuLaunchKernel_ptsz */
-  CUDA_ENTRY_ENUM(cuLaunchKernel_ptsz),
   /** cuEventCreate */
   CUDA_ENTRY_ENUM(cuEventCreate),
   /** cuEventRecord */
@@ -705,11 +699,11 @@ typedef enum {
   /** cuGetErrorName */
   CUDA_ENTRY_ENUM(cuGetErrorName),
   /** cuArray3DCreate */
-  CUDA_ENTRY_ENUM(cuArray3DCreate),
+  CUDA_ENTRY_ENUM(cuArray3DCreate_v2),
   /** cuArray3DGetDescriptor */
   CUDA_ENTRY_ENUM(cuArray3DGetDescriptor),
   /** cuArrayCreate */
-  CUDA_ENTRY_ENUM(cuArrayCreate),
+  CUDA_ENTRY_ENUM(cuArrayCreate_v2),
   /** cuArrayGetDescriptor */
   CUDA_ENTRY_ENUM(cuArrayGetDescriptor),
   /** cuCtxAttach */
@@ -749,7 +743,7 @@ typedef enum {
   /** cuDeviceGetProperties */
   CUDA_ENTRY_ENUM(cuDeviceGetProperties),
   /** cuDeviceTotalMem */
-  CUDA_ENTRY_ENUM(cuDeviceTotalMem),
+  CUDA_ENTRY_ENUM(cuDeviceTotalMem_v2),
   /** cuEGLInit */
   CUDA_ENTRY_ENUM(cuEGLInit),
   /** cuEGLStreamConsumerAcquireFrame */
@@ -774,8 +768,6 @@ typedef enum {
   CUDA_ENTRY_ENUM(cuEventDestroy),
   /** cuFuncSetAttribute */
   CUDA_ENTRY_ENUM(cuFuncSetAttribute),
-  /** cuFuncSetBlockShape */
-  CUDA_ENTRY_ENUM(cuFuncSetBlockShape),
   /** cuFuncSetSharedSize */
   CUDA_ENTRY_ENUM(cuFuncSetSharedSize),
   /** cuGLCtxCreate */
@@ -794,18 +786,10 @@ typedef enum {
   CUDA_ENTRY_ENUM(cuGraphicsResourceGetMappedPointer),
   /** cuGraphicsResourceSetMapFlags */
   CUDA_ENTRY_ENUM(cuGraphicsResourceSetMapFlags),
-  /** cuLaunch */
-  CUDA_ENTRY_ENUM(cuLaunch),
   /** cuLaunchCooperativeKernel */
   CUDA_ENTRY_ENUM(cuLaunchCooperativeKernel),
   /** cuLaunchCooperativeKernelMultiDevice */
   CUDA_ENTRY_ENUM(cuLaunchCooperativeKernelMultiDevice),
-  /** cuLaunchCooperativeKernel_ptsz */
-  CUDA_ENTRY_ENUM(cuLaunchCooperativeKernel_ptsz),
-  /** cuLaunchGrid */
-  CUDA_ENTRY_ENUM(cuLaunchGrid),
-  /** cuLaunchGridAsync */
-  CUDA_ENTRY_ENUM(cuLaunchGridAsync),
   /** cuLinkAddData_v2 */
   CUDA_ENTRY_ENUM(cuLinkAddData_v2),
   /** cuLinkAddFile_v2 */
@@ -813,13 +797,13 @@ typedef enum {
   /** cuLinkCreate_v2 */
   CUDA_ENTRY_ENUM(cuLinkCreate_v2),
   /** cuMemAlloc */
-  CUDA_ENTRY_ENUM(cuMemAlloc),
+  CUDA_ENTRY_ENUM(cuMemAlloc_v2),
   /** cuMemAllocHost */
   CUDA_ENTRY_ENUM(cuMemAllocHost),
   /** cuMemAllocHost_v2 */
   CUDA_ENTRY_ENUM(cuMemAllocHost_v2),
   /** cuMemAllocPitch */
-  CUDA_ENTRY_ENUM(cuMemAllocPitch),
+  CUDA_ENTRY_ENUM(cuMemAllocPitch_v2),
   /** cuMemcpy2D */
   CUDA_ENTRY_ENUM(cuMemcpy2D),
   /** cuMemcpy2DAsync */
@@ -896,7 +880,7 @@ typedef enum {
   // CUDA_ENTRY_ENUM(cuMemGetAttribute),
   // CUDA_ENTRY_ENUM(cuMemGetAttribute_v2),
   /** cuMemGetInfo */
-  CUDA_ENTRY_ENUM(cuMemGetInfo),
+  CUDA_ENTRY_ENUM(cuMemGetInfo_v2),
   /** cuMemHostGetDevicePointer */
   CUDA_ENTRY_ENUM(cuMemHostGetDevicePointer),
   /** cuMemHostRegister */

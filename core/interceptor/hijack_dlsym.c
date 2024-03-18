@@ -24,7 +24,7 @@
 //void *libcudaHandle = __libc_dlopen_mode("libcndrv.so", RTLD_LAZY);
 
 void *real_dlsym(void *handle, const char *symbol) {
-      static fnDlsym internal_dlsym;
+    static fnDlsym internal_dlsym;
 	  internal_dlsym = (fnDlsym)__libc_dlsym(__libc_dlopen_mode("libdl.so", RTLD_LAZY), "dlsym");
   return (*internal_dlsym)(handle, symbol);
 }
@@ -45,6 +45,33 @@ void* dlsym(void* handle, const char* symbol) {
     return (void*)(&cnInvokeKernel);
   } else if (strcmp(symbol, "cnMalloc") == 0) {
     return (void*)(&cnMalloc);
+  } else if (strcmp(symbol, "cuDriverGetVersion") == 0) {
+    return (void*)(&cuDriverGetVersion);
+  } else if (strcmp(symbol, "cuInit") == 0) {
+    return (void*)(&cuInit);
+  } else if (strcmp(symbol, "cuGetProcAddress") == 0) {
+    return (void*)(&cuGetProcAddress);
+  } else if (strcmp(symbol, "cuMemAllocManaged") == 0) {
+    return (void*)(&cuMemAllocManaged);
+  } else if (strcmp(symbol, "cuMemAlloc") == 0) {
+    return (void*)(&cuMemAlloc);
+  } else if (strcmp(symbol, "cuMemAllocPitch") == 0) {
+    return (void*)(&cuMemAllocPitch);
+  } else if (strcmp(symbol, "cuArrayCreate") == 0) {
+    return (void*)(&cuArrayCreate);
+  } else if (strcmp(symbol, "cuArray3DCreate") == 0) {
+    return (void*)(&cuArray3DCreate);
+  } else if (strcmp(symbol, "cuMipmappedArrayCreate") == 0) {
+    return (void*)(&cuMipmappedArrayCreate);
+  } else if (strcmp(symbol, "cuDeviceTotalMem") == 0) {
+    return (void*)(&cuDeviceTotalMem);
+  } else if (strcmp(symbol, "cuMemGetInfo") == 0) {
+    return (void*)(&cuMemGetInfo);
+  } else if (strcmp(symbol, "cuLaunchKernel") == 0) {
+    return (void*)(&cuLaunchKernel);
+  } else if (strcmp(symbol, "cuLaunchCooperativeKernel") == 0) {
+    return (void*)(&cuLaunchCooperativeKernel);
   }
+
   return (real_dlsym(handle, symbol));
 }

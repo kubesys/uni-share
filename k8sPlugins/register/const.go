@@ -1,28 +1,18 @@
-package nvidia
+package register
 
 const (
 	VcudaSocketName    = "vcuda.sock"
 	VirtualManagerPath = "/etc/unishare/vm"
 
-	ResourceMemory = "doslab.io/gpu-memory"
-	ResourceCore   = "doslab.io/gpu-core"
+	ResourceMemory    = "iscas.cn/gpu-memory"
+	ResourceCore      = "doslab.io/gpu-core"
+	MluResourceMemory = "iscas.cn/mlu-memory"
+	MluResourceCore   = "iscas.cn/mlu-core"
 
 	AnnAssumeTime   = "doslab.io/gpu-assume-time"
 	AnnAssignedFlag = "doslab.io/gpu-assigned"
 	//AnnResourceUUID       = "doslab.io/gpu-uuid"
 	AnnVCUDAReady = "doslab.io/vcuda"
-
-	ConfigFileName = "vcuda.config"
-	pidFileName    = "pids.config"
-
-	CgroupV1Base = "/sys/fs/cgroup/memory"
-	CgroupV2Base = "/sys/fs/cgroup"
-
-	CgroupProcs = "cgroup.procs"
-
-	PodQOSGuaranteed = "Guaranteed"
-	PodQOSBurstable  = "Burstable"
-	PodQOSBestEffort = "BestEffort"
 
 	/** 256MB */
 	MemoryBlockSize = 268435456
@@ -31,9 +21,4 @@ const (
 	CambriconMemSocketName  = "mlumem.sock"
 	NvidiaCoreSocketName    = "nvidiacore.sock"
 	NvidiaMemSocketName     = "nvidiamem.sock"
-)
-
-var (
-	DriverVersionMajor int
-	DriverVersionMinor int
 )

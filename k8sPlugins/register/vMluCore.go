@@ -1,4 +1,4 @@
-package nvidia
+package register
 
 import (
 	"context"
@@ -18,12 +18,7 @@ import (
 	pluginapi "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 )
 
-const (
-	vnvidiaCoreSocketName = "vnvidiacore.sock"
-	vmluCoreSocketName    = "vmlucore.sock"
-)
-
-type VcoreResourceServer struct {
+type MluCoreSrv struct {
 	kubeMessenger *podWatch.KubeMessenger
 	srv           *grpc.Server
 	socketFile    string
@@ -31,13 +26,13 @@ type VcoreResourceServer struct {
 	devInfo       *deviceInfo.GpuInfo
 }
 
-var _ pluginapi.DevicePluginServer = &VcoreResourceServer{} //检测是否实现了ListAndWatch等接口
-var _ ResourceServer = &VcoreResourceServer{}               //检测是否实现了SocketName等接口
+var _ pluginapi.DevicePluginServer = &MluCoreSrv{} //检测是否实现了ListAndWatch等接口
+var _ ResourceServer = &MluCoreSrv{}               //检测是否实现了SocketName等接口
 
-func NewVcoreResourceServer(kubeMessenger *podWatch.KubeMessenger, devInfo *deviceInfo.GpuInfo) ResourceServer {
+func NewMluCoreSrv(kubeMessenger *podWatch.KubeMessenger, devInfo *deviceInfo.GpuInfo) ResourceServer {
 	socketFile := filepath.Join("/var/lib/kubelet/device-plugins/", NvidiaCoreSocketName)
 
-	return &VcoreResourceServer{
+	return &MluCoreSrv{
 		kubeMessenger: kubeMessenger,
 		//srv:           grpc.NewServer(),
 		socketFile:   socketFile,
@@ -46,19 +41,19 @@ func NewVcoreResourceServer(kubeMessenger *podWatch.KubeMessenger, devInfo *devi
 	}
 }
 
-func (vr *VcoreResourceServer) SocketName() string {
+func (vr *MluCoreSrv) SocketName() string {
 	return vr.socketFile
 }
 
-func (vr *VcoreResourceServer) ResourceName() string {
+func (vr *MluCoreSrv) ResourceName() string {
 	return vr.resourceName
 }
 
-func (vr *VcoreResourceServer) Stop() {
+func (vr *MluCoreSrv) Stop() {
 	vr.srv.Stop()
 }
 
-func (vr *VcoreResourceServer) Run() error {
+func (vr *MluCoreSrv) Run() error {
 	vr.srv = grpc.NewServer()
 	pluginapi.RegisterDevicePluginServer(vr.srv, vr)
 
@@ -78,7 +73,7 @@ func (vr *VcoreResourceServer) Run() error {
 }
 
 /** device plugin interface */
-func (vr *VcoreResourceServer) Allocate(ctx context.Context, reqs *pluginapi.AllocateRequest) (*pluginapi.AllocateResponse, error) {
+func (vr *MluCoreSrv) Allocate(ctx context.Context, reqs *pluginapi.AllocateRequest) (*pluginapi.AllocateResponse, error) {
 
 	fmt.Println("%+v allocation request for vcore", reqs)
 	allocResp := &pluginapi.AllocateResponse{}
@@ -93,7 +88,7 @@ func (vr *VcoreResourceServer) Allocate(ctx context.Context, reqs *pluginapi.All
 	var flag bool = false
 	for _, v := range pendingPod {
 		for _, cont := range v.Spec.Containers {
-			if _, ok := cont.Resources.Limits[ResourceCore]; ok {
+			if _, ok := cont.Resources.Limits[MluResourceCore]; ok {
 				flag = true
 				break
 			}
@@ -106,7 +101,7 @@ func (vr *VcoreResourceServer) Allocate(ctx context.Context, reqs *pluginapi.All
 	var confirmPod v1.Pod
 	for _, v := range candidatePodList {
 		for _, cont := range v.Spec.Containers {
-			temp := cont.Resources.Limits[ResourceCore]
+			temp := cont.Resources.Limits[MluResourceCore]
 			reqDevCount += int(temp.Value())
 		}
 		if reqDevCount == allReqDevice {
@@ -144,32 +139,26 @@ func (vr *VcoreResourceServer) Allocate(ctx context.Context, reqs *pluginapi.All
 		Annotations: make(map[string]string),
 	}
 
-	conAllocResp.Envs["LD_LIBRARY_PATH"] = "/usr/local/nvidia/lib64"
-	conAllocResp.Envs["NVIDIA_VISIBLE_DEVICES"] = "0"
+	conAllocResp.Envs["LD_LIBRARY_PATH"] = "/usr/local/cambricon/lib64"
 	conAllocResp.Mounts = append(conAllocResp.Mounts, &pluginapi.Mount{
-		ContainerPath: "/usr/local/nvidia",
-		HostPath:      "/usr/local/nvidia",
+		ContainerPath: "/usr/local/cambricon",
+		HostPath:      "/usr/local/cambricon",
 		ReadOnly:      true,
 	})
 	conAllocResp.Devices = append(conAllocResp.Devices, &pluginapi.DeviceSpec{
-		ContainerPath: "/dev/nvidiactl",
-		HostPath:      "/dev/nvidiactl",
-		Permissions:   "rwm",
-	})
-	conAllocResp.Devices = append(conAllocResp.Devices, &pluginapi.DeviceSpec{
-		ContainerPath: "/dev/nvidia-uvm",
-		HostPath:      "/dev/nvidia-uvm",
-		Permissions:   "rwm",
-	})
-	conAllocResp.Devices = append(conAllocResp.Devices, &pluginapi.DeviceSpec{
-		ContainerPath: "/dev/nvidia-uvm-tools",
-		HostPath:      "/dev/nvidia-uvm-tools",
+		ContainerPath: "/dev/cambricon_ctl",
+		HostPath:      "/dev/cambricon_ctl",
 		Permissions:   "rwm",
 	})
 	//根据调度器分配的uuid，或者gpuid，再决定挂哪个设备上去
 	conAllocResp.Devices = append(conAllocResp.Devices, &pluginapi.DeviceSpec{
-		ContainerPath: "/dev/nvidia0",
-		HostPath:      "/dev/nvidia0",
+		ContainerPath: "/dev/cambricon_dev0",
+		HostPath:      "/dev/cambricon_dev0",
+		Permissions:   "rwm",
+	})
+	conAllocResp.Devices = append(conAllocResp.Devices, &pluginapi.DeviceSpec{
+		ContainerPath: "/dev/cambricon_ipcm0",
+		HostPath:      "/dev/cambricon_ipcm0",
 		Permissions:   "rwm",
 	})
 
@@ -185,12 +174,11 @@ func (vr *VcoreResourceServer) Allocate(ctx context.Context, reqs *pluginapi.All
 	return allocResp, nil
 }
 
-func (vr *VcoreResourceServer) ListAndWatch(e *pluginapi.Empty, s pluginapi.DevicePlugin_ListAndWatchServer) error {
+func (vr *MluCoreSrv) ListAndWatch(e *pluginapi.Empty, s pluginapi.DevicePlugin_ListAndWatchServer) error {
 	klog.V(2).Infof("ListAndWatch request for vcore")
-	fmt.Println("ListAndWatch request for vcore")
 
 	devs := make([]*pluginapi.Device, 0)
-	devs = vr.getNvidiaDevice()
+	devs = vr.getMluDevice()
 
 	s.Send(&pluginapi.ListAndWatchResponse{Devices: devs})
 
@@ -202,21 +190,21 @@ func (vr *VcoreResourceServer) ListAndWatch(e *pluginapi.Empty, s pluginapi.Devi
 	return nil
 }
 
-func (vr *VcoreResourceServer) GetDevicePluginOptions(ctx context.Context, e *pluginapi.Empty) (*pluginapi.DevicePluginOptions, error) {
+func (vr *MluCoreSrv) GetDevicePluginOptions(ctx context.Context, e *pluginapi.Empty) (*pluginapi.DevicePluginOptions, error) {
 	klog.V(2).Infof("GetDevicePluginOptions request for vcore")
 	return &pluginapi.DevicePluginOptions{PreStartRequired: true}, nil
 }
 
-func (vr *VcoreResourceServer) PreStartContainer(ctx context.Context, req *pluginapi.PreStartContainerRequest) (*pluginapi.PreStartContainerResponse, error) {
+func (vr *MluCoreSrv) PreStartContainer(ctx context.Context, req *pluginapi.PreStartContainerRequest) (*pluginapi.PreStartContainerResponse, error) {
 	klog.V(2).Infof("PreStartContainer request for vcore")
 	return &pluginapi.PreStartContainerResponse{}, nil
 }
 
-func (vr *VcoreResourceServer) GetPreferredAllocation(context.Context, *pluginapi.PreferredAllocationRequest) (*pluginapi.PreferredAllocationResponse, error) {
+func (vr *MluCoreSrv) GetPreferredAllocation(context.Context, *pluginapi.PreferredAllocationRequest) (*pluginapi.PreferredAllocationResponse, error) {
 	return &pluginapi.PreferredAllocationResponse{}, nil
 }
 
-func (vr *VcoreResourceServer) getMluDevice() []*pluginapi.Device {
+func (vr *MluCoreSrv) getMluDevice() []*pluginapi.Device {
 	devs := make([]*pluginapi.Device, 0)
 
 	mluDevices := &pluginapi.Device{
@@ -228,33 +216,3 @@ func (vr *VcoreResourceServer) getMluDevice() []*pluginapi.Device {
 
 	return devs
 }
-
-func (vr *VcoreResourceServer) getNvidiaDevice() []*pluginapi.Device {
-
-	devs := make([]*pluginapi.Device, 0)
-	n, _ := vr.devInfo.GetInfo()
-	for i := int(0); i < n; i++ {
-		gpuDevices := &pluginapi.Device{
-			ID:     fmt.Sprintf("%s-%d", ResourceCore, i),
-			Health: pluginapi.Healthy,
-		}
-		devs = append(devs, gpuDevices)
-	}
-
-	return devs
-}
-
-func getVCUDAReadyFromPodAnnotation(pod *v1.Pod) string {
-	ready := ""
-	if len(pod.ObjectMeta.Annotations) > 0 {
-		value, found := pod.ObjectMeta.Annotations[AnnVCUDAReady]
-		if found {
-			ready = value
-		} else {
-			fmt.Printf("Failed to get vcuda flag for pod %s in ns %s.\n", pod.Name, pod.Namespace)
-		}
-	}
-	return ready
-}
-
-func allocFakeAnnotationForTest()

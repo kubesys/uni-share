@@ -1,4 +1,4 @@
-package nvidia
+package server
 
 import (
 	"context"
@@ -53,11 +53,19 @@ import (
 //  char occupied[4044];
 //  char container_name[FILENAME_MAX];
 //  char bus_id[NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE];
-//  uint64_t gpu_memory;
+//  uint64_t memory;
 //  int utilization;
 //  int hard_limit;
 //  struct version_t driver_version;
 //  int enable;
+// } __attribute__((packed, aligned(8)));
+//
+// struct mlu_data_t {
+// 	char pod_uid[48];
+// 	char container_name[FILENAME_MAX];
+// 	char bus_id[NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE];
+// 	uint64_t mlu_memory;
+// 	int utilization;
 // } __attribute__((packed, aligned(8)));
 //
 // int setting_to_disk(const char* filename, struct resource_data_t* data) {
@@ -319,6 +327,13 @@ func (vm *VirtualManager) creatVcudaServer(pod gjson.Result) {
 			requestCore += m
 			m, _ = strconv.ParseInt(mem, 10, 64)
 			requestMemory += m
+		} else if limits.Get(MluResourceCore).Exists() && limits.Get(MluResourceMemory).Exists() {
+			core := limits.Get(MluResourceCore).String()
+			mem := limits.Get(MluResourceMemory).String()
+			m, _ := strconv.ParseInt(core, 10, 64)
+			requestCore += m
+			m, _ = strconv.ParseInt(mem, 10, 64)
+			requestMemory += m
 		}
 
 		return true
@@ -388,6 +403,14 @@ func (vm *VirtualManager) deletePodPath(pod gjson.Result) {
 	os.RemoveAll(filepath.Clean(filepath.Join(VirtualManagerPath, podUID)))
 
 }
+
+/*
+/etc/uni-share/vm
+├── podUID1
+├── podUID2
+│   ├── containerName1(id)
+│   └── containerName2(id)
+*/
 
 func (vm *VirtualManager) RegisterVDevice(ctx context.Context, req *vcuda.VDeviceRequest) (*vcuda.VDeviceResponse, error) {
 
@@ -510,34 +533,34 @@ func (vm *VirtualManager) createPidsFile(pidFileName, containerID string, pod *g
 	return nil
 }
 
-func (vm *VirtualManager) createVCUDAFile(vcudaFileName, podUID, containerName string) error {
-	log.Infof("Write %s", vcudaFileName)
+func (vm *VirtualManager) createVCUDAFile(configFileName, podUID, containerName string) error {
+	log.Infof("Write %s", configFileName)
 	requestMemory, requestCore := int64(0), int64(0)
 	vm.mu.Lock()
 	requestMemory = vm.MemoryRequestByPodUID[podUID]
 	requestCore = vm.CoreRequestByPodUID[podUID]
 	vm.mu.Unlock()
 
-	var vcudaConfig C.struct_resource_data_t
+	var vConfig C.struct_resource_data_t
 
 	cPodUID := C.CString(podUID)
 	cContName := C.CString(containerName)
-	cFileName := C.CString(vcudaFileName)
+	cFileName := C.CString(configFileName)
 
 	defer C.free(unsafe.Pointer(cPodUID))
 	defer C.free(unsafe.Pointer(cContName))
 	defer C.free(unsafe.Pointer(cFileName))
 
-	C.strcpy(&vcudaConfig.pod_uid[0], (*C.char)(unsafe.Pointer(cPodUID)))
-	C.strcpy(&vcudaConfig.container_name[0], (*C.char)(unsafe.Pointer(cContName)))
-	vcudaConfig.gpu_memory = C.uint64_t(requestMemory) * MemoryBlockSize
-	vcudaConfig.utilization = C.int(requestCore)
-	vcudaConfig.hard_limit = 1
-	vcudaConfig.driver_version.major = C.int(DriverVersionMajor)
-	vcudaConfig.driver_version.minor = C.int(DriverVersionMinor)
-	vcudaConfig.enable = 1
+	C.strcpy(&vConfig.pod_uid[0], (*C.char)(unsafe.Pointer(cPodUID)))
+	C.strcpy(&vConfig.container_name[0], (*C.char)(unsafe.Pointer(cContName)))
+	vConfig.memory = C.uint64_t(requestMemory) * MemoryBlockSize
+	vConfig.utilization = C.int(requestCore)
+	vConfig.hard_limit = 1
+	vConfig.driver_version.major = C.int(DriverVersionMajor)
+	vConfig.driver_version.minor = C.int(DriverVersionMinor)
+	vConfig.enable = 1
 
-	if C.setting_to_disk(cFileName, &vcudaConfig) != 0 {
+	if C.setting_to_disk(cFileName, &vConfig) != 0 {
 		return errors.New("create vcuda.config file error")
 	}
 

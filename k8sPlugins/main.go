@@ -9,8 +9,9 @@ import (
 	"syscall"
 	"time"
 	"uni-share/deviceInfo"
-	"uni-share/nvidia"
 	"uni-share/podWatch"
+	"uni-share/register"
+	"uni-share/server"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/kubesys/client-go/pkg/kubesys"
@@ -23,7 +24,7 @@ var (
 	//url        = pflag.String("url", "", "https://ip:port")
 	//token      = pflag.String("token", "", "master node token")
 	serverFlag  = false
-	resourceSrv = make(map[string]nvidia.ResourceServer, 0)
+	resourceSrv = make(map[string]register.ResourceServer, 0)
 )
 
 const (
@@ -45,7 +46,7 @@ func main() {
 	mes := podWatch.NewKubeMessenger(client, "133.133.135.73")
 	podWatcher := kubesys.NewKubernetesWatcher(client, podMgr)
 	go client.WatchResources("Pod", "", podWatcher)
-	virtMgr := nvidia.NewVirtualManager(client, podMgr)
+	virtMgr := server.NewVirtualManager(client, podMgr)
 	go virtMgr.Run()
 
 	devInfo := deviceInfo.NewGpuInfo(client)
@@ -53,16 +54,16 @@ func main() {
 	//自己打上环境变量，从环境变量获取节点名称
 	//devInfo.CreateCRD("133.133.135.73")
 
-	rscFactory := nvidia.NewresourceFactory()
+	rscFactory := register.NewresourceFactory()
 	vcoreServer, _ := rscFactory.CreateResource("nvidiaCore", mes, devInfo)
 	go vcoreServer.Run()
 	vmemServer, _ := rscFactory.CreateResource("nvinvidiaMem", mes, devInfo)
 	go vmemServer.Run()
-	resourceSrv[nvidia.NvidiaCoreSocketName] = vcoreServer
-	resourceSrv[nvidia.NvidiaMemSocketName] = vmemServer
+	resourceSrv[register.NvidiaCoreSocketName] = vcoreServer
+	resourceSrv[register.NvidiaMemSocketName] = vmemServer
 
 	//结束处理
-	sigChan := nvidia.NewOSWatcher(syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM) //注册信号处理函数，接受到这几个信号将信号通知发送给sigChan
+	sigChan := NewOSWatcher(syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM) //注册信号处理函数，接受到这几个信号将信号通知发送给sigChan
 	go func() {
 		select {
 		case sig := <-sigChan:
@@ -71,7 +72,7 @@ func main() {
 		}
 	}()
 	//处理kubelet重启
-	watcher, err := nvidia.NewFileWatcher(pluginapi.DevicePluginPath) //监视/var/lib/kubelet/device-plugins下的文件
+	watcher, err := NewFileWatcher(pluginapi.DevicePluginPath) //监视/var/lib/kubelet/device-plugins下的文件
 	if err != nil {
 		log.Fatalf("Failed to created file watcher: %s.", err)
 	}

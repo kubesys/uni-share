@@ -21,17 +21,27 @@
 
 #include "monitor.h"
 #include "control.h"
+#include "hijack.h"
 
 static int cur_cores = 0;
 static int total_cores = 0;
 extern int total_mlu_cores;
 extern int total_gpu_cores;
 
-extern int card_core_count = 0;
-extern int card_thread_pre_core = 256;
+extern int card_core_count;
+extern int card_thread_pre_core;
 
-extern int sm_num = 0;
-extern int max_thread_per_sm = 0;
+extern int sm_num;
+extern int max_thread_per_sm;
+
+static const struct timespec g_cycle = {
+        .tv_sec = 0,
+        .tv_nsec = TIME_TICK * MILLISEC,
+};
+static const struct timespec g_wait = {
+        .tv_sec = 0,
+        .tv_nsec = 120 * MILLISEC,
+};
 
 void *source_control(void *arg) {
 	int up_limit = 20;
@@ -39,7 +49,9 @@ void *source_control(void *arg) {
 	int share = 0;
 	__uint32_t container_total_uti = 0;
 
-    if (strcmp(arg.accelerator, "mlu") == 0) {
+  const char *accelerator = (const char *)arg;
+
+    if (strcmp(accelerator, "mlu") == 0) {
         total_cores = total_mlu_cores;
     }
     else {
@@ -47,16 +59,17 @@ void *source_control(void *arg) {
     }
 
 	while(1) {
-        if (strcmp(arg.accelerator, "mlu") == 0)
+        nanosleep(&g_wait, NULL);
+        if (strcmp(accelerator, "mlu") == 0)
         {
             container_total_uti = get_uti("mlu");
             if (container_total_uti < up_limit / 10) {
-        	    cur_mlu_cores = delta_for_mlu(yaml_limit, container_total_uti, share);
+        	    cur_cores = delta_for_mlu(yaml_limit, container_total_uti, share);
         	    continue;
             }
       	    share = delta_for_mlu(yaml_limit, container_total_uti, share);
         }
-        else if (strcmp(arg.accelerator, "gpu") == 0) {
+        else if (strcmp(accelerator, "gpu") == 0) {
             container_total_uti = get_uti("gpu");
             if (container_total_uti < up_limit / 10) {
         	    cur_cores = delta_for_gpu(yaml_limit, container_total_uti, share);
@@ -66,7 +79,6 @@ void *source_control(void *arg) {
         }
 		
 	  	change_token(share);
-		
 	}
 }
 
@@ -94,7 +106,7 @@ int delta_for_gpu(int up_limit, int user_current, int share) {
   int utilization_diff =
           abs(up_limit - user_current) < 5 ? 5 : abs(up_limit - user_current);
   int increment =
-          card_core_count * card_core_count * card_thread_pre_core * utilization_diff / 2560;
+          sm_num * sm_num * max_thread_per_sm * utilization_diff / 2560;
   
   if (utilization_diff > up_limit / 2) {
     increment = increment * utilization_diff * 2 / (up_limit + 1);
@@ -113,21 +125,21 @@ int delta_for_gpu(int up_limit, int user_current, int share) {
 static void change_token(int delta) {
   int mlu_cores_before = 0, mlu_cores_after = 0;
 
-  LOGGER(5, "delta: %d, curr: %d", delta, cur_mlu_cores);
+  LOGGER(5, "delta: %d, curr: %d", delta, cur_cores);
   do {
-    mlu_cores_before = cur_mlu_cores;
+    mlu_cores_before = cur_cores;
     mlu_cores_after = mlu_cores_before + delta;
 
     if (unlikely(mlu_cores_after > total_cores)) {
       mlu_cores_after = total_cores;
     }
-  } while (!CAS(&cur_mlu_cores, mlu_cores_before, mlu_cores_after));
+  } while (!CAS(&cur_cores, mlu_cores_before, mlu_cores_after));
 }
 
 void rate_limiter(int grids, int blocks) {
     int before_cores = 0;
     int after_cores = 0;
-    int kernel_size = grids * blocks;
+    int kernel_size = grids;
     
     LOGGER(5, "grid: %d, blocks: %d", grids, blocks);
     LOGGER(5, "launch kernel %d, curr core: %d", kernel_size, cur_cores);
