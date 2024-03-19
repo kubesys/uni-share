@@ -1,17 +1,14 @@
 package server
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 	"uni-share/podWatch"
 	"uni-share/vcuda"
@@ -20,7 +17,6 @@ import (
 	"github.com/kubesys/client-go/pkg/kubesys"
 	log "github.com/sirupsen/logrus"
 	"github.com/tidwall/gjson"
-	"google.golang.org/grpc"
 	v1 "k8s.io/api/core/v1"
 )
 
@@ -123,7 +119,6 @@ import "C"
 
 type VirtualManager struct {
 	vcuda.UnimplementedVCUDAServiceServer
-	manyServer            map[string]*grpc.Server
 	PodByUID              map[string]gjson.Result //包含gpu资源的pod
 	ContainerNameByUid    map[string]string
 	ContainerUIDByName    map[string]string
@@ -139,7 +134,6 @@ type VirtualManager struct {
 
 func NewVirtualManager(client *kubesys.KubernetesClient, podMgr *podWatch.PodManager) *VirtualManager {
 	return &VirtualManager{
-		manyServer:            make(map[string]*grpc.Server),
 		PodByUID:              make(map[string]gjson.Result),
 		ContainerNameByUid:    make(map[string]string, 0),
 		ContainerUIDByName:    make(map[string]string, 0),
@@ -164,6 +158,10 @@ func (vm *VirtualManager) Run() {
 			vm.podMgr.MuOfModify.Lock()
 			vm.podMgr.PodModObj = vm.podMgr.PodModObj[1:]
 			vm.podMgr.MuOfModify.Unlock()
+			meta := jsonObj.Get("metadata")
+			if meta.Get("name").String() == "testpod117" {
+				fmt.Println(jsonObj)
+			}
 			go vm.creatVcudaServer(jsonObj)
 		}
 		if len(vm.podMgr.PodDelObj) > 0 {
@@ -175,7 +173,6 @@ func (vm *VirtualManager) Run() {
 		}
 	}
 
-	fmt.Println("END OF VIRTUALMANAGER.RUN")
 }
 
 /*
@@ -184,22 +181,45 @@ pod传指针还是实体
 创建一个pod调了5次。。。。
 */
 func (vm *VirtualManager) creatVcudaServer(pod gjson.Result) {
+	var resFlag bool = false
 	meta := pod.Get("metadata")
+	fmt.Println("createVcudaServer", meta.Get("name").String())
 	if !meta.Get("annotations").Exists() {
-		fmt.Println(meta)
 		log.Errorln("Failed to get pod annotation.")
 		return
 	}
+	specTest := pod.Get("spec")
+	specTest.Get("containers").ForEach(func(key, value gjson.Result) bool {
+		if !(value.Get("resources").Exists()) {
+			return true
+		}
+		resources := value.Get("resources")
+		if !(resources.Get("requests").Exists()) {
+			return true
+		}
+
+		resFlag = true
+		return true
+	})
+	// if !resTest.Get(ResourceCore).Exists() && !resTest.Get(ResourceMemory).Exists() {
+	// 	fmt.Println("not need gpu resource")
+	// 	return
+	// }
+	if !resFlag {
+		fmt.Println("not need gpu resource")
+		return
+	}
+
 	annotations := meta.Get("annotations")
-	if !annotations.Get(AnnAssumeTime).Exists() { //调度时分配的
-		fmt.Println(meta.Get("name").String(), "not need gpu resource")
-		return
-	}
+	// if !annotations.Get(AnnAssumeTime).Exists() { //调度时分配的
+	// 	fmt.Println(meta.Get("name").String(), "not need gpu resource")
+	// 	return
+	// }
 	flag := annotations.Get(`doslab\.io/gpu-assigned`).String() //调度成功分配的false，容器创建后改成true，这里只检查是否有annotation
-	if flag == "" {
-		log.Errorln("Failed to get assigned flag.")
-		return
-	}
+	// if flag == "" {
+	// 	log.Errorln("Failed to get assigned flag.")
+	// 	return
+	// }
 
 	podName := meta.Get("name").String()
 	if podName == "" {
@@ -216,9 +236,8 @@ func (vm *VirtualManager) creatVcudaServer(pod gjson.Result) {
 		log.Errorln("Failed to get pod podUID.")
 		return
 	}
-	vm.mu.Lock()
+	fmt.Println("flag is", flag, "cont func be visit?", vm.PodDoByUID[podUID])
 	if flag == "true" && !vm.PodDoByUID[podUID] { //容器创建后执行，PodDoByUID保证这些语句只执行一次（pod创建会多次状态变更会多次调用creatVcudaServer）
-		vm.mu.Unlock()
 		status := pod.Get("status")
 
 		ready := false
@@ -244,70 +263,76 @@ func (vm *VirtualManager) creatVcudaServer(pod gjson.Result) {
 			return
 		}
 
-		vm.mu.Lock()
+		vm.mu.Lock() //这里往下直接return会导致死锁
+		fmt.Println(status.Get("containerStatuses"))
+		var contStatusFlag bool = false
 		status.Get("containerStatuses").ForEach(func(key, value gjson.Result) bool {
 			uidStr := value.Get("containerID").String()
+			fmt.Println("uidStr is", uidStr)
 			if uidStr == "" {
 				return true
 			}
 			name := value.Get("name").String()
+			fmt.Println("cont name is ", name)
 			if name == "" {
 				return true
 			}
 			uid := strings.Split(uidStr, "docker://")[1]
-			fmt.Println(uid)
+			fmt.Println("uid is", uid)
 			vm.ContainerNameByUid[uid] = name
 			vm.ContainerUIDByName[name] = uid
 			vm.ContainerUIDInPodUID[podUID] = append(vm.ContainerUIDInPodUID[podUID], uid)
-
+			contStatusFlag = true
 			return true
 		})
+		vm.mu.Unlock()
+		if !contStatusFlag {
+			return
+		}
+		var baseDir string
+		contUidList := vm.ContainerUIDInPodUID[podUID]
+		for _, v := range contUidList {
+			if isCgroupVersionV2() {
+				baseDir = filepath.Join(VirtualManagerPath, podUID, vm.ContainerNameByUid[v])
+			} else {
+				baseDir = filepath.Join(VirtualManagerPath, podUID, v)
+			}
+			if err := os.MkdirAll(baseDir, 0777); err != nil && !os.IsNotExist(err) {
+				log.Errorf("Failed to create %s, %s.", baseDir, err)
+			}
+
+			/*
+				Create vcuda.config file
+				/etc/uni-share/vm
+				├── podUID1
+				├── podUID2
+				│   ├── containerName1(id)
+				│   └── containerName2(id)
+			*/
+			vcudaFileName := filepath.Join(baseDir, ConfigFileName)
+			//标记修改
+			err := vm.createVCUDAFile(vcudaFileName, podUID, vm.ContainerNameByUid[v])
+			if err != nil {
+				log.Errorf("Failed to create %s, %s.", vcudaFileName, err)
+			}
+		}
+		fmt.Println("basedir is ", baseDir)
 
 		vm.PodDoByUID[podUID] = true
 	}
 
 	if vm.PodVisitedByUID[podUID] {
-		vm.mu.Unlock()
 		return
 	}
-
+	vm.mu.Lock()
 	vm.PodVisitedByUID[podUID] = true
 	vm.PodByUID[podUID] = pod
 	vm.mu.Unlock()
-	//create vcudaServer
 	baseDir := filepath.Join(VirtualManagerPath, podUID)
 	if err := os.MkdirAll(baseDir, 0777); err != nil && !os.IsExist(err) {
 		log.Errorf("Failed to create %s, %s.", baseDir, err)
 		return
 	}
-
-	sockfile := filepath.Join(baseDir, VcudaSocketName)
-	err := syscall.Unlink(sockfile)
-	if err != nil && !os.IsNotExist(err) {
-		log.Errorf("Failed to remove %s, %s.", sockfile, err)
-		return
-	}
-
-	l, err := net.Listen("unix", sockfile)
-	if err != nil {
-		log.Errorf("Failed to listen for %s, %s.", sockfile, err)
-		return
-	}
-
-	err = os.Chmod(sockfile, 0777)
-	if err != nil {
-		log.Errorf("Failed to chmod for %s, %s.", sockfile, err)
-		return
-	}
-	server := grpc.NewServer([]grpc.ServerOption{}...)
-	vcuda.RegisterVCUDAServiceServer(server, vm)
-	go server.Serve(l)
-
-	vm.mu.Lock()
-	vm.manyServer[podUID] = server
-	vm.mu.Unlock()
-	log.Infof("Success to create VCUDA gRPC server for pod %s.", podUID)
-
 	spec := pod.Get("spec")
 	requestMemory, requestCore := int64(0), int64(0)
 	spec.Get("containers").ForEach(func(key, value gjson.Result) bool {
@@ -315,7 +340,7 @@ func (vm *VirtualManager) creatVcudaServer(pod gjson.Result) {
 			return true
 		}
 		resources := value.Get("resources")
-		if !(value.Get("limits").Exists()) {
+		if !(resources.Get("limits").Exists()) {
 			return true
 		}
 		limits := resources.Get("limits")
@@ -343,7 +368,6 @@ func (vm *VirtualManager) creatVcudaServer(pod gjson.Result) {
 	vm.CoreRequestByPodUID[podUID] = requestCore
 	vm.MemoryRequestByPodUID[podUID] = requestMemory
 	vm.mu.Unlock()
-
 	//Update annotation
 	time.Sleep(time.Second)
 	copyPodBytes, err := vm.client.GetResource("Pod", namespace, podName)
@@ -385,12 +409,10 @@ func (vm *VirtualManager) deletePodPath(pod gjson.Result) {
 	}
 
 	vm.PodVisitedByUID[podUID] = false
-	vm.manyServer[podUID].Stop()
 
 	delete(vm.CoreRequestByPodUID, podUID)
 	delete(vm.MemoryRequestByPodUID, podUID)
 	delete(vm.PodByUID, podUID)
-	delete(vm.manyServer, podUID)
 	delete(vm.PodDoByUID, podUID)
 
 	for _, uid := range vm.ContainerUIDInPodUID[podUID] {
@@ -402,135 +424,6 @@ func (vm *VirtualManager) deletePodPath(pod gjson.Result) {
 
 	os.RemoveAll(filepath.Clean(filepath.Join(VirtualManagerPath, podUID)))
 
-}
-
-/*
-/etc/uni-share/vm
-├── podUID1
-├── podUID2
-│   ├── containerName1(id)
-│   └── containerName2(id)
-*/
-
-func (vm *VirtualManager) RegisterVDevice(ctx context.Context, req *vcuda.VDeviceRequest) (*vcuda.VDeviceResponse, error) {
-
-	podUID := req.PodUid
-	containerID := req.ContainerId
-	containerName := req.ContainerName
-
-	baseDir := ""
-
-	ready := false
-	for i := 0; i < 100; i++ {
-		vm.mu.Lock()
-		if !vm.PodDoByUID[podUID] {
-			vm.mu.Unlock()
-			time.Sleep(200 * time.Millisecond)
-		} else {
-			vm.mu.Unlock()
-			ready = true
-			break
-		}
-	}
-
-	if !ready {
-		return nil, errors.New("no containerStatuses")
-	}
-
-	if len(containerName) > 0 {
-		log.Infof("Pod %s, container name %s call rpc.", podUID, containerName)
-		baseDir = filepath.Join(VirtualManagerPath, podUID, containerName)
-		vm.mu.Lock()
-		containerID = vm.ContainerUIDByName[containerName]
-		vm.mu.Unlock()
-	} else {
-		log.Infof("Pod %s, container id %s call rpc.", podUID, containerID)
-		baseDir = filepath.Join(VirtualManagerPath, podUID, containerID)
-		vm.mu.Lock()
-		containerName = vm.ContainerNameByUid[containerID]
-		vm.mu.Unlock()
-	}
-
-	if err := os.MkdirAll(baseDir, 0777); err != nil && !os.IsNotExist(err) {
-		log.Errorf("Failed to create %s, %s.", baseDir, err)
-		return nil, err
-	}
-
-	pidFileName := filepath.Join(baseDir, pidFileName)
-	vcudaFileName := filepath.Join(baseDir, ConfigFileName)
-
-	// Create pids.config file
-	pod := gjson.Result{}
-	vm.mu.Lock()
-	pod = vm.PodByUID[podUID]
-	vm.mu.Unlock()
-
-	err := vm.createPidsFile(pidFileName, containerID, &pod)
-	if err != nil {
-		log.Errorf("Failed to create %s, %s.", pidFileName, err)
-		return nil, err
-	}
-
-	// Create vcuda.config file
-	err = vm.createVCUDAFile(vcudaFileName, podUID, containerName)
-	if err != nil {
-		log.Errorf("Failed to create %s, %s.", vcudaFileName, err)
-		return nil, err
-	}
-
-	return &vcuda.VDeviceResponse{}, nil
-}
-
-func (vm *VirtualManager) createPidsFile(pidFileName, containerID string, pod *gjson.Result) error {
-	log.Infof("Write %s", pidFileName)
-	cFileName := C.CString(pidFileName)
-	defer C.free(unsafe.Pointer(cFileName))
-
-	//cgroupPath, err := getCgroupPath(pod, containerID)
-	cgroupPath := getCgroupPath(pod, containerID)
-	// if err != nil {
-	// 	return err
-	// }
-
-	pidsInContainer := make([]int, 0)
-	var cgroupBase = " "
-	if 1 == getCgroupVersion() {
-		cgroupBase = CgroupV2Base
-	} else {
-		cgroupBase = CgroupV1Base
-	}
-	baseDir := filepath.Join(cgroupBase, cgroupPath)
-
-	filepath.Walk(baseDir, func(path string, info os.FileInfo, err error) error {
-		if info == nil {
-			return nil
-		}
-		if info.IsDir() || info.Name() != CgroupProcs {
-			return nil
-		}
-
-		p, err := readProcsFile(path)
-		if err == nil {
-			pidsInContainer = append(pidsInContainer, p...)
-		}
-
-		return nil
-	})
-
-	if len(pidsInContainer) == 0 {
-		return errors.New("empty pids")
-	}
-
-	pids := make([]C.int, len(pidsInContainer))
-	for i := range pidsInContainer {
-		pids[i] = C.int(pidsInContainer[i])
-	}
-
-	if C.pids_to_disk(cFileName, &pids[0], (C.int)(len(pids))) != 0 {
-		return errors.New("create pids.config file error")
-	}
-
-	return nil
 }
 
 func (vm *VirtualManager) createVCUDAFile(configFileName, podUID, containerName string) error {

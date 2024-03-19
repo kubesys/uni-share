@@ -115,6 +115,8 @@ func (vr *VcoreResourceServer) Allocate(ctx context.Context, reqs *pluginapi.All
 		}
 	}
 
+	//getuuidFromAnnotation()
+
 	//等待那边server建好文件夹，这里确定是哪个pod，再挂对应pod文件夹进去
 	isOk := false
 	for i := 0; i < 100; i++ {
@@ -136,14 +138,13 @@ func (vr *VcoreResourceServer) Allocate(ctx context.Context, reqs *pluginapi.All
 	if !isOk {
 		return nil, errors.New("vcuda not ready")
 	}
-
 	conAllocResp := &pluginapi.ContainerAllocateResponse{
 		Envs:        make(map[string]string),
 		Mounts:      make([]*pluginapi.Mount, 0),
 		Devices:     make([]*pluginapi.DeviceSpec, 0), //代表/dev下的设备,这个设备和pluginapi.Device有什么映射关系吗
 		Annotations: make(map[string]string),
 	}
-
+	//一是挂库，二是挂对应pod文件夹
 	conAllocResp.Envs["LD_LIBRARY_PATH"] = "/usr/local/nvidia/lib64"
 	conAllocResp.Envs["NVIDIA_VISIBLE_DEVICES"] = "0"
 	conAllocResp.Mounts = append(conAllocResp.Mounts, &pluginapi.Mount{
@@ -256,5 +257,3 @@ func getVCUDAReadyFromPodAnnotation(pod *v1.Pod) string {
 	}
 	return ready
 }
-
-func allocFakeAnnotationForTest()

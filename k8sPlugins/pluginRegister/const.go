@@ -5,7 +5,7 @@ const (
 	VirtualManagerPath = "/etc/unishare/vm"
 
 	ResourceMemory    = "iscas.cn/gpu-memory"
-	ResourceCore      = "doslab.io/gpu-core"
+	ResourceCore      = "iscas.cn/gpu-core"
 	MluResourceMemory = "iscas.cn/mlu-memory"
 	MluResourceCore   = "iscas.cn/mlu-core"
 

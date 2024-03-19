@@ -17,10 +17,11 @@ const (
 )
 
 type GpuInfo struct {
-	count   int
-	gpuUid  []string
-	memInfo map[string]nvml.Memory //nvml.Memory{total, free ,used}
-	client  *kubesys.KubernetesClient
+	count       int
+	gpuUid      []string
+	memInfo     map[string]nvml.Memory //nvml.Memory{total, free ,used}
+	client      *kubesys.KubernetesClient
+	minorNumber []int
 }
 
 func NewGpuInfo(client *kubesys.KubernetesClient) *GpuInfo {
@@ -62,6 +63,8 @@ func (m *GpuInfo) NvmlTest() {
 		} else {
 			m.gpuUid = append(m.gpuUid, uuid)
 		}
+		minNum, _ := device.GetMinorNumber()
+		m.minorNumber = append(m.minorNumber, minNum)
 
 		mem, ret := device.GetMemoryInfo()
 		if ret != nvml.SUCCESS {

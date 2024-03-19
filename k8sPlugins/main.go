@@ -28,8 +28,8 @@ var (
 )
 
 const (
-	url   = "https://133.133.135.73:6443"
-	token = "s"
+	url   = "https://133.133.135.134:6443"
+	token = ""
 )
 
 func main() {
@@ -57,7 +57,7 @@ func main() {
 	rscFactory := register.NewresourceFactory()
 	vcoreServer, _ := rscFactory.CreateResource("nvidiaCore", mes, devInfo)
 	go vcoreServer.Run()
-	vmemServer, _ := rscFactory.CreateResource("nvinvidiaMem", mes, devInfo)
+	vmemServer, _ := rscFactory.CreateResource("nvidiaMem", mes, devInfo)
 	go vmemServer.Run()
 	resourceSrv[register.NvidiaCoreSocketName] = vcoreServer
 	resourceSrv[register.NvidiaMemSocketName] = vmemServer

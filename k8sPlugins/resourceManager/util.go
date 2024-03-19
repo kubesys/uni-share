@@ -40,24 +40,22 @@ func getArchFamily(computeMajor, computeMinor int) string {
 	return "Unknown"
 }
 
-func getCgroupVersion() int {
+func isCgroupVersionV2() bool {
 	cmd := exec.Command("sh", "-c", "mount | grep cgroup")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-
+		log.Fatal()
 	}
 
 	outputStr := string(output)
-
-	// 拆分为行
 	lines := strings.Split(outputStr, "\n")
 	for _, line := range lines {
 		if strings.Contains(line, "/sys/fs/cgroup/memory") {
-			return 0
+			return false
 		}
 	}
 
-	return 1
+	return true
 }
 
 func getCgroupPath(pod *gjson.Result, containerID string) string {
