@@ -1,4 +1,4 @@
-package server
+package resourceManager
 
 import (
 	"encoding/json"
@@ -45,23 +45,9 @@ import (
 //
 // struct resource_data_t {
 //  char pod_uid[48];
-//  int limit;
-//  char occupied[4044];
 //  char container_name[FILENAME_MAX];
-//  char bus_id[NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE];
 //  uint64_t memory;
 //  int utilization;
-//  int hard_limit;
-//  struct version_t driver_version;
-//  int enable;
-// } __attribute__((packed, aligned(8)));
-//
-// struct mlu_data_t {
-// 	char pod_uid[48];
-// 	char container_name[FILENAME_MAX];
-// 	char bus_id[NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE];
-// 	uint64_t mlu_memory;
-// 	int utilization;
 // } __attribute__((packed, aligned(8)));
 //
 // int setting_to_disk(const char* filename, struct resource_data_t* data) {
@@ -201,10 +187,6 @@ func (vm *VirtualManager) creatVcudaServer(pod gjson.Result) {
 		resFlag = true
 		return true
 	})
-	// if !resTest.Get(ResourceCore).Exists() && !resTest.Get(ResourceMemory).Exists() {
-	// 	fmt.Println("not need gpu resource")
-	// 	return
-	// }
 	if !resFlag {
 		fmt.Println("not need gpu resource")
 		return
@@ -394,7 +376,7 @@ func (vm *VirtualManager) deletePodPath(pod gjson.Result) {
 		return
 	}
 	annotations := meta.Get("annotations")
-	if !annotations.Get(AnnAssumeTime).Exists() {
+	if !annotations.Get(`doslab\.io/gpu-assigned`).Exists() {
 		return
 	}
 
@@ -448,10 +430,6 @@ func (vm *VirtualManager) createVCUDAFile(configFileName, podUID, containerName 
 	C.strcpy(&vConfig.container_name[0], (*C.char)(unsafe.Pointer(cContName)))
 	vConfig.memory = C.uint64_t(requestMemory) * MemoryBlockSize
 	vConfig.utilization = C.int(requestCore)
-	vConfig.hard_limit = 1
-	vConfig.driver_version.major = C.int(DriverVersionMajor)
-	vConfig.driver_version.minor = C.int(DriverVersionMinor)
-	vConfig.enable = 1
 
 	if C.setting_to_disk(cFileName, &vConfig) != 0 {
 		return errors.New("create vcuda.config file error")

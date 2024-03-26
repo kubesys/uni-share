@@ -6,6 +6,8 @@ static char cgroupInfoPath[PATH_LENGTH];
 char base_dir[PATH_LENGTH];
 char pid_path[PATH_LENGTH];
 char config_path[PATH_LENGTH];
+rc_data_t config_data;
+
 
 static const struct timespec g_cycle = {
     .tv_sec = 0,
@@ -275,9 +277,6 @@ static int get_path_by_cgroup(int cgroupVersion) {
   LOGGER(4, "pid file: %s", pid_path);
   ret = 0;
 
-  LOGGER(4, "register to remote: pod uid: %s, cont id: %s", pod_uid,
-         container_id);
-  register_to_remote_with_data("", pod_uid, container_id, cont_name);
 DONE:
   return ret;
 }
@@ -290,85 +289,31 @@ int read_controller_configuration() {
     if (get_path_by_cgroup(checkCgroupVersion())) {
         LOGGER(FATAL, "can't get config file path");
     }
-    // fd = open(config_path, O_RDONLY);
-    // if (unlikely(fd == -1)) {
-    //     LOGGER(4, "can't open %s, error %s", config_path, strerror(errno));
-    //     goto DONE;
-    // }
+    fd = open(config_path, O_RDONLY);
+    if (unlikely(fd == -1)) {
+        LOGGER(4, "can't open %s, error %s", config_path, strerror(errno));
+        goto DONE;
+    }
 
-    // rsize = (int)read(fd, (void *)&g_vcuda_config, sizeof(resource_data_t));
-    // if (unlikely(rsize != sizeof(g_vcuda_config))) {
-    //     LOGGER(4, "can't read %s, need %zu but got %d", CONTROLLER_CONFIG_PATH,
-    //         sizeof(resource_data_t), rsize);
-    //     goto DONE;
-    // }
+    rsize = (int)read(fd, (void *)&config_data, sizeof(rc_data_t));
+    if (unlikely(rsize != sizeof(config_data))) {
+        LOGGER(4, "can't read %s, need %zu but got %d", CONTROLLER_CONFIG_PATH,
+            sizeof(rc_data_t), rsize);
+        goto DONE;
+    }
 
-    // ret = 0;
+    LOGGER(4, "pod_uid is %s", config_data.pod_uid);
+    LOGGER(4, "container_name is %s", config_data.container_name);
+    LOGGER(4, "memory limit is %ld", config_data.memory);
+    LOGGER(4, "utilization limit is %d", config_data.utilization);
 
-    // DONE:
-    // if (likely(fd)) {
-    //     close(fd);
-    // }
+    ret = 0;
+
+    DONE:
+    if (likely(fd)) {
+        close(fd);
+    }
 
     return ret;
 }
 
-
-void register_to_remote_with_data(const char* bus_id, const char* pod_uid,
-                                  const char* container, const char* cont_name) {
-  pid_t register_pid;
-  int wstatus = 0, wret = 0;
-  pid_t child_pid;
-  int pipe_fd[2];
-  int ret = -1;
-
-  ret = pipe(pipe_fd);
-  if (unlikely(ret)) {
-    LOGGER(FATAL, "create pipe failed, error %s", strerror(errno));
-  }
-
-  register_pid = fork();
-  if (!register_pid) {
-    close(pipe_fd[1]);
-    while (read(pipe_fd[0], &child_pid, sizeof(pid_t)) == 0) {
-      nanosleep(&g_cycle, NULL);
-    }
-
-    // child
-    if (!checkCgroupVersion()) {
-      ret = execl((RPC_CLIENT_PATH RPC_CLIENT_NAME), RPC_CLIENT_NAME,
-                  "--bus-id", bus_id, "--pod-uid", pod_uid,
-                  "--cont-id", container, (char*)NULL);
-    } else {
-      ret = execl((RPC_CLIENT_PATH RPC_CLIENT_NAME), RPC_CLIENT_NAME,
-                  "--bus-id", bus_id, "--pod-uid", pod_uid,
-                  "--cont-name", container, (char*)NULL);
-    }
-    if (unlikely(ret == -1)) {
-      LOGGER(FATAL, "can't register to manager, error %s", strerror(errno));
-    }
-
-    close(pipe_fd[0]);
-    _exit(EXIT_SUCCESS);
-  } else {
-    close(pipe_fd[0]);
-
-    while (write(pipe_fd[1], &register_pid, sizeof(pid_t)) == 0) {
-      nanosleep(&g_cycle, NULL);
-    }
-
-    do {
-      wret = waitpid(register_pid, &wstatus, WUNTRACED | WCONTINUED);
-      if (unlikely(wret == -1)) {
-        LOGGER(FATAL, "waitpid failed, error %s", strerror(errno));
-      }
-    } while (!WIFEXITED(wstatus) && !WIFSIGNALED(wstatus));
-
-    ret = WEXITSTATUS(wstatus);
-    if (unlikely(ret)) {
-      LOGGER(FATAL, "rpc client exit with %d", ret);
-    }
-
-    close(pipe_fd[1]);
-  }
-}

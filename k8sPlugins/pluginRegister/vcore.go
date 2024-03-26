@@ -1,4 +1,4 @@
-package register
+package pluginRegister
 
 import (
 	"context"
@@ -145,11 +145,25 @@ func (vr *VcoreResourceServer) Allocate(ctx context.Context, reqs *pluginapi.All
 		Annotations: make(map[string]string),
 	}
 	//一是挂库，二是挂对应pod文件夹
+	//conAllocResp.Envs["LD_PRELOAD"] = "/etc/unishare/hooklib/libmylibrary.so"
 	conAllocResp.Envs["LD_LIBRARY_PATH"] = "/usr/local/nvidia/lib64"
 	conAllocResp.Envs["NVIDIA_VISIBLE_DEVICES"] = "0"
 	conAllocResp.Mounts = append(conAllocResp.Mounts, &pluginapi.Mount{
 		ContainerPath: "/usr/local/nvidia",
 		HostPath:      "/usr/local/nvidia",
+		ReadOnly:      true,
+	})
+	conAllocResp.Mounts = append(conAllocResp.Mounts, &pluginapi.Mount{
+		ContainerPath: "/etc/unishare/hooklib",
+		HostPath:      "/etc/unishare/hooklib",
+		ReadOnly:      true,
+	})
+	podUid := string(confirmPod.ObjectMeta.UID)
+	hostFilePath := "/etc/unishare/vm/" + podUid
+	containerFilePath := "/etc/unishare/" + podUid
+	conAllocResp.Mounts = append(conAllocResp.Mounts, &pluginapi.Mount{
+		ContainerPath: containerFilePath,
+		HostPath:      hostFilePath,
 		ReadOnly:      true,
 	})
 	conAllocResp.Devices = append(conAllocResp.Devices, &pluginapi.DeviceSpec{

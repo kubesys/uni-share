@@ -22,6 +22,7 @@
 #include "monitor.h"
 #include "control.h"
 #include "hijack.h"
+#include "container.h"
 
 static int cur_cores = 0;
 static int total_cores = 0;
@@ -34,6 +35,8 @@ extern int card_thread_pre_core;
 extern int sm_num;
 extern int max_thread_per_sm;
 
+extern rc_data_t config_data;
+
 static const struct timespec g_cycle = {
         .tv_sec = 0,
         .tv_nsec = TIME_TICK * MILLISEC,
@@ -45,7 +48,7 @@ static const struct timespec g_wait = {
 
 void *source_control(void *arg) {
 	int up_limit = 20;
-	int yaml_limit = 20;
+	int yaml_limit = config_data.utilization;
 	int share = 0;
 	__uint32_t container_total_uti = 0;
 

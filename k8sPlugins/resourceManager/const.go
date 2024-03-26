@@ -1,4 +1,4 @@
-package server
+package resourceManager
 
 const (
 	VcudaSocketName    = "vcuda.sock"

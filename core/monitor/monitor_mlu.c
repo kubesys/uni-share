@@ -88,13 +88,17 @@ __uint32_t get_mlu_uti() {
     return container_total_uti;
 }
 
-cn_uint64_t get_mlu_mem() {
-    cn_uint64_t proc_used_mem = 0;
+unsigned long get_mlu_mem() {
+    unsigned long proc_used_mem = 0;
+    cndevDevice_t devHandle;
+    cndevRet_t ret;
       // get card[x]'s process info
     // in most cases, the number of processes running on a card will not exceed 10
     // but if cndevProcessInfo's space is not enough, CNDEV_ERROR_INSUFFICIENT_SPACE will be returned
     unsigned tCount = 10;
     cndevProcessInfo_t *procInfo = NULL;
+
+    ret = cndevGetDeviceHandleByIndex(0, &devHandle);
     procInfo = (cndevProcessInfo_t *) malloc(tCount * sizeof(cndevProcessInfo_t));
     procInfo->version = CNDEV_VERSION_5;
     ret = cndevGetProcessInfo(&tCount, procInfo, devHandle);

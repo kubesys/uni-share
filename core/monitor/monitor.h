@@ -29,6 +29,6 @@ void initCudev();
 __uint32_t get_mlu_uti();
 __uint32_t get_gpu_uti();
 __uint32_t get_uti(const char* device);
-
+unsigned long get_mlu_mem();
 
 #endif

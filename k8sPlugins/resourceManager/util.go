@@ -2,7 +2,7 @@
  * Copyright (2021, ) Institute of Software, Chinese Academy of Sciences
  **/
 
-package server
+package resourceManager
 
 import (
 	"bufio"

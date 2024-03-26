@@ -1,4 +1,4 @@
-package register
+package pluginRegister
 
 const (
 	VcudaSocketName    = "vcuda.sock"

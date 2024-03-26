@@ -32,8 +32,13 @@ int get_cgroup_data(const char *pid_cgroup, char *pod_uid, char *container_id,
                     size_t size);
 int checkCgroupVersion(); 
 static int get_path_by_cgroup(int cgroupVersion);    
-int read_controller_configuration();   
-void register_to_remote_with_data(const char* bus_id, const char* pod_uid,
-                                  const char* container, const char* cont_name);           
+int read_controller_configuration();
+
+typedef struct resource_data_t {
+    char pod_uid[48];
+    char container_name[FILENAME_MAX];
+    uint64_t memory;
+    int utilization;
+} rc_data_t __attribute__((packed, aligned(8)));
 
 #endif

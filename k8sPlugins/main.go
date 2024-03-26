@@ -9,9 +9,9 @@ import (
 	"syscall"
 	"time"
 	"uni-share/deviceInfo"
+	"uni-share/pluginRegister"
 	"uni-share/podWatch"
-	"uni-share/register"
-	"uni-share/server"
+	"uni-share/resourceManager"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/kubesys/client-go/pkg/kubesys"
@@ -24,12 +24,12 @@ var (
 	//url        = pflag.String("url", "", "https://ip:port")
 	//token      = pflag.String("token", "", "master node token")
 	serverFlag  = false
-	resourceSrv = make(map[string]register.ResourceServer, 0)
+	resourceSrv = make(map[string]pluginRegister.ResourceServer, 0)
 )
 
 const (
 	url   = "https://133.133.135.134:6443"
-	token = ""
+	token = ""	
 )
 
 func main() {
@@ -46,7 +46,7 @@ func main() {
 	mes := podWatch.NewKubeMessenger(client, "133.133.135.73")
 	podWatcher := kubesys.NewKubernetesWatcher(client, podMgr)
 	go client.WatchResources("Pod", "", podWatcher)
-	virtMgr := server.NewVirtualManager(client, podMgr)
+	virtMgr := resourceManager.NewVirtualManager(client, podMgr)
 	go virtMgr.Run()
 
 	devInfo := deviceInfo.NewGpuInfo(client)
@@ -54,13 +54,13 @@ func main() {
 	//自己打上环境变量，从环境变量获取节点名称
 	//devInfo.CreateCRD("133.133.135.73")
 
-	rscFactory := register.NewresourceFactory()
+	rscFactory := pluginRegister.NewresourceFactory()
 	vcoreServer, _ := rscFactory.CreateResource("nvidiaCore", mes, devInfo)
 	go vcoreServer.Run()
 	vmemServer, _ := rscFactory.CreateResource("nvidiaMem", mes, devInfo)
 	go vmemServer.Run()
-	resourceSrv[register.NvidiaCoreSocketName] = vcoreServer
-	resourceSrv[register.NvidiaMemSocketName] = vmemServer
+	resourceSrv[pluginRegister.NvidiaCoreSocketName] = vcoreServer
+	resourceSrv[pluginRegister.NvidiaMemSocketName] = vmemServer
 
 	//结束处理
 	sigChan := NewOSWatcher(syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM) //注册信号处理函数，接受到这几个信号将信号通知发送给sigChan
