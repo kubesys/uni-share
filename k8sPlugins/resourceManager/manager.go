@@ -11,7 +11,6 @@ import (
 	"sync"
 	"time"
 	"uni-share/podWatch"
-	"uni-share/vcuda"
 	"unsafe"
 
 	"github.com/kubesys/client-go/pkg/kubesys"
@@ -104,7 +103,6 @@ import (
 import "C"
 
 type VirtualManager struct {
-	vcuda.UnimplementedVCUDAServiceServer
 	PodByUID              map[string]gjson.Result //包含gpu资源的pod
 	ContainerNameByUid    map[string]string
 	ContainerUIDByName    map[string]string
@@ -298,7 +296,6 @@ func (vm *VirtualManager) creatVcudaServer(pod gjson.Result) {
 				log.Errorf("Failed to create %s, %s.", vcudaFileName, err)
 			}
 		}
-		fmt.Println("basedir is ", baseDir)
 
 		vm.PodDoByUID[podUID] = true
 	}
@@ -327,8 +324,9 @@ func (vm *VirtualManager) creatVcudaServer(pod gjson.Result) {
 		}
 		limits := resources.Get("limits")
 		//必须指定limit的core和memory
-		if limits.Get(ResourceCore).Exists() && limits.Get(ResourceMemory).Exists() {
-			core := limits.Get(ResourceCore).String()
+		//if limits.Get(ResourceCore).Exists() && limits.Get(ResourceMemory).Exists() {
+		if limits.Get(`iscas\.cn/gpu-core`).Exists() {
+			core := limits.Get(`iscas\.cn/gpu-core`).String()
 			mem := limits.Get(ResourceMemory).String()
 			m, _ := strconv.ParseInt(core, 10, 64)
 			requestCore += m
@@ -342,6 +340,7 @@ func (vm *VirtualManager) creatVcudaServer(pod gjson.Result) {
 			m, _ = strconv.ParseInt(mem, 10, 64)
 			requestMemory += m
 		}
+		fmt.Println("fasfasfasssssdasd", requestCore, requestMemory)
 
 		return true
 	})

@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata: 
+  name: unishare-manager-daemonset
+  namespace: kube-stack
+spec: 
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      name: unishare-manager-ds
+  template:
+    metadata:
+      labels:
+        name: unishare-manager-ds
+    spec: 
+      nodeSelector:
+        unishare_enable: enable
+      hostPID: true
+      containers:
+        - image: uni-share:v1.0
+          imagePullPolicy: IfNotPresent
+          name: unishare-manager
+          securityContext:
+            privileged: true
+          command: ["uni-share"]
+          args: ["--url=", "--token="]
+          env: 
+            - name: LD_LIBRARY_PATH
+              value: /usr/local/nvidia/lib64
+            - name: DAEMON_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          volumeMounts: 
+            - name: device-plugin
+              mountPath: /var/lib/kubelet/device-plugins
+            - name: config
+              mountPath: /etc/unishare
+            - name: gpu-lib
+              mountPath: /usr/local/nvidia
+              readOnly: true
+      volumes: 
+        - name: device-plugin
+          hostPath: 
+            type: Directory
+            path: /var/lib/kubelet/device-plugins
+        - name: config
+          hostPath:
+            type: DirectoryOrCreate
+            path: /etc/unishare
+        - name: gpu-lib
+          hostPath:
+            type: Directory
+            path: /usr/local/nvidia
+          
+          

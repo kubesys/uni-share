@@ -30,6 +30,7 @@ void initCudev() {
 
     total_gpu_cores = sm_num * max_thread_per_sm * 32;
 
+
 }
 
 __uint32_t get_gpu_uti() {

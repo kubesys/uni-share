@@ -21,9 +21,11 @@
  #include "hijack.h"
  #include "monitor.h"
  #include "control.h"
+ #include "container.h"
 
- pthread_once_t gpu_lib_ptr_init = PTHREAD_ONCE_INIT;
- pthread_once_t gpu_prod = PTHREAD_ONCE_INIT;
+pthread_once_t gpu_lib_ptr_init = PTHREAD_ONCE_INIT;
+pthread_once_t gpu_prod = PTHREAD_ONCE_INIT;
+pthread_once_t read_config = PTHREAD_ONCE_INIT;
 
  entry_t cuda_library_entry[] = {
     {.name = "cuInit"},
@@ -254,7 +256,6 @@
     {.name = "cuDeviceComputeCapability"},
     {.name = "cuDeviceGetProperties"},
     {.name = "cuDeviceTotalMem"},
-    {.name = "cuEGLInit"},
     {.name = "cuEGLStreamConsumerAcquireFrame"},
     {.name = "cuEGLStreamConsumerConnect"},
     {.name = "cuEGLStreamConsumerConnectWithFlags"},
@@ -588,7 +589,7 @@ CUresult cuDriverGetVersion(int *driverVersion) {
 
 CUresult cuInit(unsigned int flag) {
     CUresult ret;
-
+    pthread_once(&read_config, read_controller_configuration);
     pthread_once(&gpu_lib_ptr_init, getGpuDriverLibPtrDlsym);
     pthread_once(&gpu_prod, create_prod_gpu_thread);
     ret = MY_CALL_ENTRY(REAL_GPU_FUNC_PTR(cuInit), flag);
@@ -599,9 +600,11 @@ CUresult cuInit(unsigned int flag) {
 CUresult cuGetProcAddress(const char *symbol, void **pfn, int cudaVersion,
                           cuuint64_t flags) {
   CUresult ret;
+
+  pthread_once(&read_config, read_controller_configuration);
   pthread_once(&gpu_lib_ptr_init, getGpuDriverLibPtrDlsym);
   pthread_once(&gpu_prod, create_prod_gpu_thread);
-  printf("hijacking cuGetProcAddress\n");
+  //printf("hijacking cuGetProcAddress\n");
   ret = MY_CALL_ENTRY(REAL_GPU_FUNC_PTR(cuGetProcAddress), symbol, pfn, cudaVersion, flags);
 
   if (ret == CUDA_SUCCESS) {
@@ -634,7 +637,9 @@ CUresult cuMemAllocManaged(CUdeviceptr *dptr, size_t bytesize,
 CUresult cuMemAlloc(CUdeviceptr *dptr, size_t bytesize) {
   CUresult ret;
 
-  ret = MY_CALL_ENTRY(REAL_GPU_FUNC_PTR(cuMemAlloc), dptr, bytesize, CU_MEM_ATTACH_GLOBAL);
+  //ret = MY_CALL_ENTRY(REAL_GPU_FUNC_PTR(cuMemAlloc), dptr, bytesize);
+  //全局共享内存
+  ret = MY_CALL_ENTRY(REAL_GPU_FUNC_PTR(cuMemAllocManaged), dptr, bytesize, CU_MEM_ATTACH_GLOBAL);
 
   return ret;
 }
@@ -703,7 +708,7 @@ CUresult cuLaunchKernel(CUfunction f, unsigned int gridDimX,
                         unsigned int blockDimX, unsigned int blockDimY,
                         unsigned int blockDimZ, unsigned int sharedMemBytes,
                         CUstream hStream, void **kernelParams, void **extra) {
-  printf("HIJACKING cuLaunchKernel\n");
+  //printf("HIJACKING cuLaunchKernel\n");
   rate_limiter(gridDimX * gridDimY * gridDimZ,
                blockDimX * blockDimY * blockDimZ);
   return MY_CALL_ENTRY(REAL_GPU_FUNC_PTR(cuLaunchKernel), f, gridDimX,

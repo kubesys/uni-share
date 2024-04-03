@@ -27,7 +27,7 @@
 #include <dlfcn.h>
 #include <string.h>
 #include <stdint.h>
-#include "cn_api.h"
+#include <cn_api.h>
 #include <time.h>
 #include <pthread.h>
 #include <cuda.h>
@@ -744,8 +744,6 @@ typedef enum {
   CUDA_ENTRY_ENUM(cuDeviceGetProperties),
   /** cuDeviceTotalMem */
   CUDA_ENTRY_ENUM(cuDeviceTotalMem_v2),
-  /** cuEGLInit */
-  CUDA_ENTRY_ENUM(cuEGLInit),
   /** cuEGLStreamConsumerAcquireFrame */
   CUDA_ENTRY_ENUM(cuEGLStreamConsumerAcquireFrame),
   /** cuEGLStreamConsumerConnect */

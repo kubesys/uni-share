@@ -43,21 +43,23 @@ static const struct timespec g_cycle = {
 };
 static const struct timespec g_wait = {
         .tv_sec = 0,
-        .tv_nsec = 120 * MILLISEC,
+        .tv_nsec = 200 * MILLISEC,
 };
 
 void *source_control(void *arg) {
-	int up_limit = 20;
 	int yaml_limit = config_data.utilization;
 	int share = 0;
 	__uint32_t container_total_uti = 0;
 
   const char *accelerator = (const char *)arg;
 
+
     if (strcmp(accelerator, "mlu") == 0) {
+        initCndev();
         total_cores = total_mlu_cores;
     }
     else {
+        initCudev();
         total_cores = total_gpu_cores;
     }
 
@@ -66,7 +68,7 @@ void *source_control(void *arg) {
         if (strcmp(accelerator, "mlu") == 0)
         {
             container_total_uti = get_uti("mlu");
-            if (container_total_uti < up_limit / 10) {
+            if (container_total_uti < yaml_limit / 10) {
         	    cur_cores = delta_for_mlu(yaml_limit, container_total_uti, share);
         	    continue;
             }
@@ -74,7 +76,7 @@ void *source_control(void *arg) {
         }
         else if (strcmp(accelerator, "gpu") == 0) {
             container_total_uti = get_uti("gpu");
-            if (container_total_uti < up_limit / 10) {
+            if (container_total_uti < yaml_limit / 10) {
         	    cur_cores = delta_for_gpu(yaml_limit, container_total_uti, share);
         	    continue;
             }
@@ -126,17 +128,17 @@ int delta_for_gpu(int up_limit, int user_current, int share) {
 }
 
 static void change_token(int delta) {
-  int mlu_cores_before = 0, mlu_cores_after = 0;
+  int cores_before = 0, cores_after = 0;
 
   LOGGER(5, "delta: %d, curr: %d", delta, cur_cores);
   do {
-    mlu_cores_before = cur_cores;
-    mlu_cores_after = mlu_cores_before + delta;
+    cores_before = cur_cores;
+    cores_after = cores_before + delta;
 
-    if (unlikely(mlu_cores_after > total_cores)) {
-      mlu_cores_after = total_cores;
+    if (unlikely(cores_after > total_cores)) {
+      cores_after = total_cores;
     }
-  } while (!CAS(&cur_cores, mlu_cores_before, mlu_cores_after));
+  } while (!CAS(&cur_cores, cores_before, cores_after));
 }
 
 void rate_limiter(int grids, int blocks) {

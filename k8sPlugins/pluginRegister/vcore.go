@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"syscall"
 	"time"
 	"uni-share/deviceInfo"
@@ -115,8 +117,6 @@ func (vr *VcoreResourceServer) Allocate(ctx context.Context, reqs *pluginapi.All
 		}
 	}
 
-	//getuuidFromAnnotation()
-
 	//等待那边server建好文件夹，这里确定是哪个pod，再挂对应pod文件夹进去
 	isOk := false
 	for i := 0; i < 100; i++ {
@@ -138,6 +138,21 @@ func (vr *VcoreResourceServer) Allocate(ctx context.Context, reqs *pluginapi.All
 	if !isOk {
 		return nil, errors.New("vcuda not ready")
 	}
+
+	requestCore := int64(0)
+	requestMem := int64(0)
+	for _, cont := range confirmPod.Spec.Containers {
+		tmp := cont.Resources.Limits[ResourceCore]
+		requestCore += tmp.Value()
+		tmp = cont.Resources.Limits[ResourceMemory]
+		requestMem += tmp.Value()
+	}
+	uuid, err := vr.kubeMessenger.GetGpuResource(requestCore, requestMem)
+	if err != nil {
+		return nil, err
+	}
+	minorNum := vr.devInfo.GetMinorNumber(uuid)
+
 	conAllocResp := &pluginapi.ContainerAllocateResponse{
 		Envs:        make(map[string]string),
 		Mounts:      make([]*pluginapi.Mount, 0),
@@ -145,22 +160,23 @@ func (vr *VcoreResourceServer) Allocate(ctx context.Context, reqs *pluginapi.All
 		Annotations: make(map[string]string),
 	}
 	//一是挂库，二是挂对应pod文件夹
-	//conAllocResp.Envs["LD_PRELOAD"] = "/etc/unishare/hooklib/libmylibrary.so"
+	conAllocResp.Envs["LD_PRELOAD"] = "/usr/local/hooklib/libmylibrary.so"
 	conAllocResp.Envs["LD_LIBRARY_PATH"] = "/usr/local/nvidia/lib64"
-	conAllocResp.Envs["NVIDIA_VISIBLE_DEVICES"] = "0"
+	//conAllocResp.Envs["NVIDIA_VISIBLE_DEVICES"] = "0"
 	conAllocResp.Mounts = append(conAllocResp.Mounts, &pluginapi.Mount{
 		ContainerPath: "/usr/local/nvidia",
 		HostPath:      "/usr/local/nvidia",
 		ReadOnly:      true,
 	})
 	conAllocResp.Mounts = append(conAllocResp.Mounts, &pluginapi.Mount{
-		ContainerPath: "/etc/unishare/hooklib",
+		ContainerPath: "/usr/local/hooklib",
 		HostPath:      "/etc/unishare/hooklib",
 		ReadOnly:      true,
 	})
 	podUid := string(confirmPod.ObjectMeta.UID)
 	hostFilePath := "/etc/unishare/vm/" + podUid
-	containerFilePath := "/etc/unishare/" + podUid
+	containerFilePath := "/etc/unishare/vm"
+	log.Println(hostFilePath, containerFilePath)
 	conAllocResp.Mounts = append(conAllocResp.Mounts, &pluginapi.Mount{
 		ContainerPath: containerFilePath,
 		HostPath:      hostFilePath,
@@ -182,14 +198,16 @@ func (vr *VcoreResourceServer) Allocate(ctx context.Context, reqs *pluginapi.All
 		Permissions:   "rwm",
 	})
 	//根据调度器分配的uuid，或者gpuid，再决定挂哪个设备上去
+
+	devicePath := "/dev/nvidia" + strconv.Itoa(minorNum)
 	conAllocResp.Devices = append(conAllocResp.Devices, &pluginapi.DeviceSpec{
-		ContainerPath: "/dev/nvidia0",
-		HostPath:      "/dev/nvidia0",
+		ContainerPath: devicePath,
+		HostPath:      devicePath,
 		Permissions:   "rwm",
 	})
 
 	confirmPod.Annotations[AnnAssignedFlag] = "true"
-	err := vr.kubeMessenger.UpdatePodAnnotations(&confirmPod)
+	err = vr.kubeMessenger.UpdatePodAnnotations(&confirmPod)
 	if err != nil {
 		fmt.Printf("Failed to update pod annotation for pod %s on ns %s.", confirmPod.Name, confirmPod.Namespace)
 		return nil, errors.New("failed to update pod annotation")
@@ -248,7 +266,7 @@ func (vr *VcoreResourceServer) getNvidiaDevice() []*pluginapi.Device {
 
 	devs := make([]*pluginapi.Device, 0)
 	n, _ := vr.devInfo.GetInfo()
-	for i := int(0); i < n; i++ {
+	for i := int(0); i < n*100; i++ {
 		gpuDevices := &pluginapi.Device{
 			ID:     fmt.Sprintf("%s-%d", ResourceCore, i),
 			Health: pluginapi.Healthy,

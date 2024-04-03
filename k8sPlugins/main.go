@@ -15,35 +15,33 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/kubesys/client-go/pkg/kubesys"
+	"github.com/spf13/pflag"
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 	pluginapi "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 )
 
 var (
-	//url        = pflag.String("url", "", "https://ip:port")
-	//token      = pflag.String("token", "", "master node token")
+	url         = pflag.String("url", "", "https://ip:port")
+	token       = pflag.String("token", "", "master node token")
 	serverFlag  = false
 	resourceSrv = make(map[string]pluginRegister.ResourceServer, 0)
 )
 
-const (
-	url   = "https://133.133.135.134:6443"
-	token = ""	
-)
-
 func main() {
-	//pflag.Parse()
+	pflag.Parse()
 
-	//fmt.Println("String Flag:", *url)
-	//fmt.Println("String Flag:", *token)
+	if *url == "" || *token == "" {
+		log.Fatal("get url token error")
+	}
 
 	//client := kubesys.NewKubernetesClientWithDefaultKubeConfig()
-	client := kubesys.NewKubernetesClient(url, token)
+	client := kubesys.NewKubernetesClient(*url, *token)
 	client.Init()
 
+	env := os.Getenv("DAEMON_NODE_NAME")
 	podMgr := podWatch.NewPodManager()
-	mes := podWatch.NewKubeMessenger(client, "133.133.135.73")
+	mes := podWatch.NewKubeMessenger(client, env)
 	podWatcher := kubesys.NewKubernetesWatcher(client, podMgr)
 	go client.WatchResources("Pod", "", podWatcher)
 	virtMgr := resourceManager.NewVirtualManager(client, podMgr)
@@ -51,8 +49,7 @@ func main() {
 
 	devInfo := deviceInfo.NewGpuInfo(client)
 	devInfo.NvmlTest()
-	//自己打上环境变量，从环境变量获取节点名称
-	//devInfo.CreateCRD("133.133.135.73")
+	devInfo.CreateCRD(env)
 
 	rscFactory := pluginRegister.NewresourceFactory()
 	vcoreServer, _ := rscFactory.CreateResource("nvidiaCore", mes, devInfo)

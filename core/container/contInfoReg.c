@@ -281,25 +281,24 @@ DONE:
   return ret;
 }
 
-int read_controller_configuration() {
+void read_controller_configuration() {
     int fd = 0;
     int rsize;
-    int ret = 1;
 
     if (get_path_by_cgroup(checkCgroupVersion())) {
         LOGGER(FATAL, "can't get config file path");
     }
     fd = open(config_path, O_RDONLY);
     if (unlikely(fd == -1)) {
-        LOGGER(4, "can't open %s, error %s", config_path, strerror(errno));
-        goto DONE;
+        close(fd);
+        LOGGER(FATAL, "can't open %s, error %s", config_path, strerror(errno));
     }
 
     rsize = (int)read(fd, (void *)&config_data, sizeof(rc_data_t));
     if (unlikely(rsize != sizeof(config_data))) {
-        LOGGER(4, "can't read %s, need %zu but got %d", CONTROLLER_CONFIG_PATH,
+        close(fd);
+        LOGGER(FATAL, "can't read %s, need %zu but got %d", CONTROLLER_CONFIG_PATH,
             sizeof(rc_data_t), rsize);
-        goto DONE;
     }
 
     LOGGER(4, "pod_uid is %s", config_data.pod_uid);
@@ -307,13 +306,9 @@ int read_controller_configuration() {
     LOGGER(4, "memory limit is %ld", config_data.memory);
     LOGGER(4, "utilization limit is %d", config_data.utilization);
 
-    ret = 0;
-
-    DONE:
     if (likely(fd)) {
         close(fd);
     }
 
-    return ret;
 }
 

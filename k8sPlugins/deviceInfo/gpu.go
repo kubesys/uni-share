@@ -17,19 +17,20 @@ const (
 )
 
 type GpuInfo struct {
-	count       int
-	gpuUid      []string
-	memInfo     map[string]nvml.Memory //nvml.Memory{total, free ,used}
-	client      *kubesys.KubernetesClient
-	minorNumber []int
+	count             int
+	gpuUid            []string
+	memInfo           map[string]nvml.Memory //nvml.Memory{total, free ,used}
+	client            *kubesys.KubernetesClient
+	minorNumberByUUID map[string]int
 }
 
 func NewGpuInfo(client *kubesys.KubernetesClient) *GpuInfo {
 	return &GpuInfo{
-		count:   0,
-		gpuUid:  make([]string, 0),
-		memInfo: make(map[string]nvml.Memory, 0),
-		client:  client,
+		count:             0,
+		gpuUid:            make([]string, 0),
+		memInfo:           make(map[string]nvml.Memory, 0),
+		client:            client,
+		minorNumberByUUID: make(map[string]int, 0),
 	}
 }
 
@@ -64,7 +65,7 @@ func (m *GpuInfo) NvmlTest() {
 			m.gpuUid = append(m.gpuUid, uuid)
 		}
 		minNum, _ := device.GetMinorNumber()
-		m.minorNumber = append(m.minorNumber, minNum)
+		m.minorNumberByUUID[uuid] = minNum
 
 		mem, ret := device.GetMemoryInfo()
 		if ret != nvml.SUCCESS {
@@ -86,6 +87,10 @@ func (m *GpuInfo) GetMemInfo() map[string]nvml.Memory {
 
 	return m.memInfo
 
+}
+
+func (m *GpuInfo) GetMinorNumber(uuid string) int {
+	return m.minorNumberByUUID[uuid]
 }
 
 func (m *GpuInfo) CreateCRD(hostname string) {
@@ -114,9 +119,7 @@ func (m *GpuInfo) CreateCRD(hostname string) {
 				Node: hostname,
 			},
 		}
-		fmt.Println(gpu)
 		jb, err := json.Marshal(gpu)
-		fmt.Println(string(jb))
 		if err != nil {
 			log.Fatalf("Failed to marshal gpu struct, %s.", err)
 		}

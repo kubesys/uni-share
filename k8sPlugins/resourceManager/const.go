@@ -4,8 +4,8 @@ const (
 	VcudaSocketName    = "vcuda.sock"
 	VirtualManagerPath = "/etc/unishare/vm"
 
-	ResourceMemory    = "iscas.cn/gpu-memory"
-	ResourceCore      = "iscas.cn/gpu-core"
+	ResourceMemory    = `iscas.cn/gpu-memory`
+	ResourceCore      = `iscas.cn/gpu-core`
 	MluResourceMemory = "iscas.cn/mlu-memory"
 	MluResourceCore   = "iscas.cn/mlu-core"
 

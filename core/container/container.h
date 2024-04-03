@@ -11,7 +11,7 @@
 #define RPC_CLIENT_PATH "/usr/local/unishare/bin/"
 #define RPC_CLIENT_NAME "accelerator-client"
 
-#define VMLU_CONFIG_PATH "/etc/uni-share/vm"
+#define VMLU_CONFIG_PATH "/etc/unishare/vm/"
 
 /**
  * Controller pid information file name
@@ -32,7 +32,7 @@ int get_cgroup_data(const char *pid_cgroup, char *pod_uid, char *container_id,
                     size_t size);
 int checkCgroupVersion(); 
 static int get_path_by_cgroup(int cgroupVersion);    
-int read_controller_configuration();
+void read_controller_configuration();
 
 typedef struct resource_data_t {
     char pod_uid[48];

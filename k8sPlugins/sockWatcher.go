@@ -25,7 +25,7 @@ func NewFileWatcher(files ...string) (*fsnotify.Watcher, error) {
 
 func NewOSWatcher(sigs ...os.Signal) chan os.Signal {
 	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, sigs...) //将接受到的信号传给sigChan
+	signal.Notify(sigChan, sigs...)
 
 	return sigChan
 }
